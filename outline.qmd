@@ -35,10 +35,28 @@ cite the primary source instead of re-deriving it.
 - Use `[@key]` Pandoc citation syntax; every key MUST exist in `references.bib`.
   Never invent a BibTeX entry. If the citation cannot be verified, omit it and
   write the claim without an attribution.
-- Math in `$...$`/`$$...$$` (MathJax). Keep notation consistent with Appendix A.
+- **Mathematical rigor (first-class).** Mathematics is the core of this book, not
+  decoration. Every chapter must state its central ideas *formally*:
+  - Define every symbol at first use; symbols MUST match Appendix A. Never
+    introduce a symbol that already has a fixed meaning.
+  - Give the governing equations — objectives, similarities/distances, model
+    updates, estimators — as numbered display equations, and reference them
+    from the prose (`Equation (@eq-name)` / `[@eq-name]`).
+  - State variable shapes/types (e.g. $X \in \mathbb{R}^{n \times d}$) and, for
+    any loss or estimator, exactly what is minimized/maximized and over what.
+  - Where a claim rests on a derivation, give the key steps (or a short
+    derivation) rather than only prose — collapse of a loss to a known form,
+    gradient, bound, equivalence, or limiting case.
+  - Any claim that a method "improves" or "outperforms" must be either derived
+    or cited; never assert a formula's benefit without justification.
+  - State assumptions and failure cases mathematically (e.g. anisotropy,
+    identifiability, non-identifiability, rank deficiency).
+- Math is MathJax: inline `$...$`, display `$$...$$` with an `{#eq-name}` label.
 - Code blocks are illustrative and short (≤ ~20 lines), language-tagged, and
   must be runnable in principle.
-- Target length per chapter: **2,000–3,500 words** of body text.
+- Target length per chapter: **2,000–3,500 words** of body text, with at least
+  **four numbered display equations** (Chapter 1 and the appendices may carry
+  fewer where genuinely conceptual, but must still formalize their definitions).
 
 ## Acceptance criteria ("definition of done") for a chapter
 
@@ -51,6 +69,34 @@ cite the primary source instead of re-deriving it.
 5. Key Takeaways + Further Reading present.
 6. No fabricated numbers; any quantitative claim is either cited or explicitly
    labelled as illustrative.
+7. **Math requirements met:** at least four numbered display equations; every
+   symbol defined at first use; notation consistent with Appendix A; shapes,
+   domains, and the quantity being optimized stated for every loss/estimator.
+8. **Math is verified:** a reviewer has checked every equation against its
+   source claim (paper or derivation) and recorded the outcome in
+   `verification/math-review.md`. No equation contradicts its cited source.
+
+## Mathematical verification protocol
+
+Because mathematics is the backbone of the book, every chapter passes through a
+dedicated math review **after** it is drafted and **again** after any revision:
+
+1. **Notation audit.** List every symbol introduced; confirm it is defined,
+   does not collide with Appendix A, and has consistent type/dimension.
+2. **Equation audit.** For each numbered equation: (a) is the left/right-hand
+   side dimensionally consistent? (b) is the objective correctly stated
+   (what is optimized, over what, subject to what)? (c) does it match the cited
+   source? (d) is any stated derivation step actually valid?
+3. **Claim audit.** For each "improves/outperforms/encodes" claim, require either
+   a derivation or a citation; downgrade unbacked claims to descriptive prose.
+4. **Cross-reference audit.** Every `{#eq-name}` is referenced at least once and
+   every reference resolves.
+5. **Record.** Append findings to `verification/math-review.md` with
+   chapter, equation label, verdict (ok / fixed / flagged), and one-line note.
+
+The math review is a separate role from the chapter writer: the writer must not
+be the sole verifier of their own equations.
+
 
 ---
 
@@ -199,8 +245,8 @@ Brandes et al. (what PLMs learn).
 coordinate vs. graph representations.
 
 **Key citations.** Jing GVP-GNN; Satorras EGNN; Zhang GearNet; Dauparas
-ProteinMPNN; Hsu TM-vec; Hsu ESM-IF; Jumper AlphaFold2; Zhang et al. structure
-vs. sequence representations.
+ProteinMPNN; Hamamsy TM-vec; Hsu ESM-IF; Jumper AlphaFold2; van Kempen Foldseek
+(3Di structural alphabet).
 
 **Done when.** The invariance requirements of each architecture are stated.
 
@@ -406,3 +452,9 @@ Alphabetical definitions of every bolded term used in the book.
 Single shared bibliography. Keys are `firstauthorYYYY` unless a well-known
 acronym is clearer. Verifier checks: (a) key resolves in the text, (b) entry has
 title + venue/year, (c) DOI or stable URL present for post-2000 work.
+
+During drafting, chapter writers added new entries to per-chapter fragments
+under `bib/fragments/` to avoid write conflicts; these were then consolidated
+into the single `references.bib` by `tools/consolidate_bib.py`. Conflicting
+duplicates are resolved (richest entry wins, DOI preferred) and logged in
+`verification/bib-conflicts.md`.

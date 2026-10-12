@@ -2,9 +2,404 @@
 title: "Applications and Case Studies"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 14*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+The preceding chapters built representations. This chapter shows what they are used
+for end to end: turning a molecule, a variant, a protein, or a cell into a vector and
+using that vector to answer a question someone cares about. The organizing
+principle is that **the modality dictates the representation, and the question
+dictates the metric**. Every application below is stated as a triple of
+(representation, downstream model, evaluation), because an embedding is only
+meaningful relative to the task and metric applied to it.
+
+Two habits prevent the most common errors. First, always name a baseline: a learned
+embedding competes against fingerprints, substitution matrices, similarity search, or
+a simple linear model, and that comparison determines whether the representation
+added value [@rogers2010extended]. Second, always separate retrospective from
+prospective evaluation: a score computed on data resembling the training
+distribution is evidence of fit, not of utility.
+
+| Application | Modality | Embedding method | Primary metric | Source |
+|---|---|---|---|---|
+| Protein variant effects | Protein sequence | ESM-2 zero-shot / supervised head | Spearman, AUROC | [@lin2023evolutionary; @brandes2023genome] |
+| Protein variant effects | Protein evolution | Generative evolutionary model (EVE) | AUPRC | [@frazer2021disease] |
+| Regulatory variant effects | DNA sequence | DeepSEA / Enformer / genomic LM | AUROC, expression correlation | [@alipanahi2015predicting; @avsec2021effective; @dallatorre2024nucleotide] |
+| Property / QSAR–QSPR | Molecule | Chemprop D-MPNN, MolFormer | RMSE, AUROC | [@yang2019analyzing; @ross2022large] |
+| Virtual screening | Molecule + target | Graph/learned embeddings + scoring | Hit rate, enrichment factor | [@stokes2020deep] |
+| Drug repurposing | Knowledge graph | Hetionet + KG embeddings | AUROC, AUPRC | [@himmelstein2017systematic; @bordes2013translating] |
+| Function annotation | Protein sequence | ProtENN, contrastive CLEAN | Accuracy, F-max | [@bileschi2022using; @yu2023enzyme] |
+| Antibody design | Protein sequence | Language-model-guided mutation | Binding, expression | [@hie2024efficient] |
+| Protein design | Structure | ESM-IF, ProteinMPNN | Recovery, in-silico success | [@hsu2022learning; @dauparas2022robust] |
+| Generative protein design | Sequence / structure | ProGen, RFdiffusion | Validity, wet-lab assays | [@madani2023large; @watson2023novo] |
+| Patient stratification | scRNA-seq | scVI, scGPT, Geneformer | Clustering, AUROC | [@lopez2018deep; @cui2024scgpt; @theodoris2023transfer] |
+| Computational pathology | Image + omics | Vision-language model (CONCH) | AUROC | [@lu2024visual] |
+
+Table 14.1: Application → modality → method → metric map. Metrics are those used in
+the cited primary source.
+
+## Variant Effect Prediction
+
+::: {.callout-note}
+## Definition
+
+**Variant effect prediction (VEP)** estimates the functional consequence of a
+genetic change. A **zero-shot** predictor scores a variant using a pretrained
+model without any task-specific training on labeled variants, typically by
+comparing the model's likelihood of the mutant sequence to that of the wild type.
+
 :::
 
-TODO
+### Protein variant effects
+
+The simplest embedding-based VEP is the **masked-marginal** score. Let the protein be
+an amino-acid sequence $\mathbf{a}=(a_1,\dots,a_L)$ with
+$a_i\in\mathcal{V}_{\mathrm{aa}}$ (the 20 standard residues plus special tokens), and
+let $\mathbf{a}_{\setminus i}$ denote the same sequence with position $i$ replaced by
+a mask symbol. For a single substitution $v$ that replaces the wild-type residue
+$a_i$ by a mutant residue $a_i'$, a masked protein language model with parameters
+$\theta$ assigns the score
+
+$$
+s_{\mathrm{MM}}(v)=\log p_\theta\!\left(a_i'\mid \mathbf{a}_{\setminus i}\right)
+-\log p_\theta\!\left(a_i\mid \mathbf{a}_{\setminus i}\right).
+$$ {#eq-ch14-vep-score}
+
+The score is a log-likelihood ratio, and its form is not arbitrary. The model's
+conditional is a softmax over residues,
+$p_\theta(a\mid\mathbf{a}_{\setminus i})=\exp(z_a)/\sum_{a''}\exp(z_{a''})$ with
+logits $z_a$, so the normalizer — which depends on the context but not on which
+residue is compared — cancels in the difference and @eq-ch14-vep-score reduces to
+$z_{a_i'}-z_{a_i}$, the difference of the two residue logits. Using the ratio
+therefore isolates the change attributable to the substitution and is invariant to any
+context-dependent additive shift of the logits. Because the model is pretrained on
+unlabelled sequences and never trained on labelled variants, @eq-ch14-vep-score is a
+**zero-shot** estimate; the masked-marginal construction was introduced for protein
+language models [@meier2021language] and was reported to correlate with experimental
+fitness without fine-tuning at evolutionary scale [@lin2023evolutionary]. Combining
+sequence embeddings with structural context — for example by folding the mutant and
+comparing local environments — was reported to improve genome-wide prediction of
+disease variant effects and to transfer to proteins with little experimental data
+[@brandes2023genome]. A complementary route learns the distribution of natural
+sequences with a generative model over an alignment and flags variants that fall in
+low-density regions, which performs competitively on clinical benchmarks
+[@frazer2021disease]. The two families — likelihood-based and density-based — make
+different assumptions and often disagree, so a single score should not be treated as
+ground truth.
+
+Because these scores are uncalibrated across proteins, a single numeric threshold
+rarely transfers. A variant that ranks in the top percentile for a well-represented
+protein may be ordinary for a poorly represented one, so predictions should be
+reported as within-protein rankings, or recalibrated on labeled variants from the
+target family. This is why supervised fine-tuning on even a small set of measured
+variants often beats zero-shot scoring for one specific protein.
+
+### Regulatory variant effects
+
+For non-coding variants the unit of prediction is a regulatory signal such as
+chromatin accessibility or expression. Let $\mathbf{u}\in\{A,C,G,T\}^{2m+1}$ be the
+reference sequence window of radius $m$ centered on the variant, let $\mathbf{u}'$ be
+the same window carrying the alternate allele, and let
+$g_\phi:\{A,C,G,T\}^{2m+1}\to\mathbb{R}$ be a model with parameters $\phi$ that
+predicts a scalar signal. The regulatory effect score is the predicted change
+
+$$
+\Delta s_{\mathrm{reg}}(v)=g_\phi(\mathbf{u}')-g_\phi(\mathbf{u}),
+$$ {#eq-ch14-vep-reg}
+
+whose magnitude $|\Delta s_{\mathrm{reg}}|$ measures the effect and whose sign gives
+its direction. Deep learning on DNA sequence established that these signals are
+predictable from local sequence [@alipanahi2015predicting], and Enformer extended the
+receptive field to capture long-range interactions and predict expression
+quantitatively [@avsec2021effective]; the same construction @eq-ch14-vep-reg applies to
+their predicted tracks. Genomic language models
+add pretrained representations that transfer across cell types and species
+[@ji2021dnabert; @dallatorre2024nucleotide], and long-context architectures widen
+the window available to a single forward pass [@nguyen2023hyenadna]. The recurring
+failure mode is that a model predicts a regulatory *signal* accurately while the
+causal link to disease remains weak; regulatory VEP therefore demands the
+leakage-aware evaluation of Chapter 11.
+
+## Drug Discovery
+
+### Property prediction and virtual screening
+
+Molecular embeddings support quantitative structure–activity and structure–property
+relationships (QSAR/QSPR). Let a molecule $m$ be embedded as
+$\mathbf{x}=f_\theta(m)\in\mathbb{R}^{d}$, and let
+$g_\psi:\mathbb{R}^{d}\to\mathbb{R}$ be a prediction head with parameters $\psi$.
+Property regression fits
+
+$$
+\min_{\psi}\ \frac{1}{n}\sum_{i=1}^{n}
+\bigl(g_\psi(\mathbf{x}_i)-y_i\bigr)^{2},
+$$ {#eq-ch14-qsar}
+
+where $y_i\in\mathbb{R}$ is the measured property (a binding constant, solubility, or
+toxicity). Under the Gaussian-noise model of Appendix A, minimizing @eq-ch14-qsar is
+maximum-likelihood estimation, which is why squared error is the default objective for
+continuous properties; classification replaces it with cross-entropy. Learned graph
+representations studied systematically in Chemprop were reported to match or exceed
+fixed fingerprints for property regression [@yang2019analyzing], which themselves
+remain strong and inexpensive baselines [@rogers2010extended; @jaeger2018mol2vec].
+Transformer language models over SMILES provide transferable chemical representations
+that rival supervised models on several benchmarks [@ross2022large]. In virtual
+screening these representations rank a library. With $A$ actives among $T$ compounds
+and the top $k$ of a ranking retrieved, the **enrichment factor** is
+
+$$
+\mathrm{EF}_k=\frac{\bigl(\#\{\text{actives in the top }k\}\bigr)/k}{A/T},
+$$ {#eq-ch14-ef}
+
+which equals $1$ for a random ranking and grows with the quality of the ranking; @eq-ch14-ef
+says nothing about *which* actives are retrieved, so it should be reported alongside a
+ranking metric such as precision–recall area. A now-classic demonstration trained a
+graph model on growth inhibition data, screened a large compound library, and surfaced
+a molecule with broad-spectrum antibacterial activity verified in the laboratory
+[@stokes2020deep].
+The embedding is a filter, not a proof: hits require experimental confirmation, and
+the model's applicability domain is limited to chemistry resembling its training
+data.
+
+Evaluation is where screening claims are most fragile. A model validated on
+compounds chemically similar to its training set looks excellent and generalizes
+poorly, so splits that hold out whole scaffolds, rather than random compounds, give a
+more honest estimate. Prospective validation — synthesizing and testing proposed
+molecules — remains the strongest evidence, as in the antibacterial screen above
+[@stokes2020deep].
+
+### Drug repurposing
+
+Repurposing reframes the problem as link prediction over a biomedical knowledge
+graph. Heterogeneous networks integrate drugs, genes, diseases, and pathways, and
+embeddings of that graph score candidate drug–disease edges for prioritization
+[@himmelstein2017systematic]. Translational and complex-space knowledge-graph
+embeddings supply the scoring functions [@bordes2013translating]; in the translational
+(TransE) case each drug $h$ (head), relation $r$, and disease $t$ (tail) is represented
+by a vector $\mathbf{e}_h,\mathbf{e}_r,\mathbf{e}_t\in\mathbb{R}^{d}$, and a candidate link is scored by
+
+$$
+f_r(h,t)=-\lVert\mathbf{e}_h+\mathbf{e}_r-\mathbf{e}_t\rVert_2,
+$$ {#eq-ch14-kg}
+
+so the relation acts as a translation in embedding space and larger scores indicate
+more plausible drug–disease edges. Training maximizes @eq-ch14-kg on observed edges while
+minimizing it on sampled non-edges, which is exactly why retrospective evaluation is
+optimistic: a graph that already contains the test edge lets the model score it by
+memorization. Predicted target structures from folding models can add a structural
+channel [@jumper2021highly]. As with property prediction, the output is a ranked hypothesis;
+the evaluation is retrospective area under the curve, which overstates prospective
+utility when the graph leaks future edges.
+
+Repurposing evaluations are almost always retrospective, comparing predicted edges
+against known drug–disease pairs. Because biomedical knowledge graphs grow by adding
+exactly such pairs, a model that memorizes the graph scores well without discovering
+anything new. Prospective or temporal splits, in which the model predicts links added
+after a cutoff date, are the appropriate test.
+
+## Annotation Transfer and Homology-Free Function Prediction
+
+Classical annotation relies on sequence similarity, which fails for remote homologs.
+Embedding methods instead transfer function from learned representations. Deep
+protein language models annotate the protein universe with curated family labels
+without relying on alignment search [@bileschi2022using], and contrastive learning
+places enzymes in a function-aware space that predicts catalytic activity, including
+for uncharacterized proteins [@yu2023enzyme]. Embeddings from masked language models
+supply general features that feed these heads [@lin2023evolutionary]. The metric of
+record is usually classification accuracy or F-max over gene-ontology or enzyme
+labels. The honest caveat is that performance is measured on labels derived from the
+same databases that shaped the training distribution, so apparent gains can reflect
+memorization of annotation artifacts rather than generalization to genuinely novel
+families.
+
+The distinction that matters is between interpolating within a known family and
+extrapolating to a new one. Embeddings help most when a novel protein sits close to
+characterized proteins in representation space, and help least when it does not;
+nearest-neighbor distances in the embedding are therefore a useful uncertainty signal
+to report alongside the prediction.
+
+## Antibody Design and Protein Engineering
+
+Embeddings guide protein engineering by proposing mutations and ranking designs.
+Language-model-guided mutation was reported to improve antibody affinity, with the
+model sampling substitutions in context and wet-lab assays confirming gains
+[@hie2024efficient].
+Structure-conditioned inverse folding — predicting sequence from a backbone — is the
+workhorse for design tasks: ProteinMPNN recovers and designs sequences for a given
+scaffold [@dauparas2022robust], and ESM-IF does the same from predicted backbones at
+scale [@hsu2022learning]. Generative models extend this from ranking to proposing new
+sequences and backbones: autoregressive protein language models generate functional
+sequences across families [@madani2023large], and diffusion over structure designs
+novel folds and functions [@watson2023novo]. Evaluation spans computational recovery
+metrics and, decisively, experimental measures — expression, stability, and binding.
+Computational scores are necessary but not sufficient; the field's accepted evidence
+is a wet-lab binding curve.
+
+## Clinical and Biomarker Embeddings; Patient Stratification
+
+In single-cell settings, cell embeddings from probabilistic and generative models
+support clustering patients and identifying markers. scVI provides a latent space
+that corrects batch effects while preserving biological variation [@lopez2018deep],
+and pretrained cell models transfer across tissues and cohorts [@theodoris2023transfer;
+@cui2024scgpt; @hao2024large]. Multimodal pathology models align images with
+molecular or textual context, enabling image-based tasks that correlate with omics
+[@lu2024visual]. Two caveats dominate. First, integration quality is
+metric-dependent, so "good" embeddings can look good or bad depending on the chosen
+score; benchmarking studies show that no single method wins on every metric
+[@luecken2022benchmarking]. Second, embeddings learned across cohorts can encode
+batch or site effects that masquerade as biology. Any stratification claim therefore
+requires evaluation on held-out cohorts with batch-aware metrics.
+
+A further practical point is that cell embeddings are usually evaluated for how
+cleanly they separate known cell types, which is easier than the clinical question of
+predicting outcome. Strong clustering does not imply prognostic value, and the two
+should be measured separately.
+
+Across all these applications the same discipline applies: define the decision the
+embedding is meant to support, choose the metric that reflects that decision, and
+state plainly what the model cannot see.
+
+## Worked Case Study: Zero-Shot Protein Variant Effect Prediction
+
+This case study is a minimal, reproducible-in-principle pipeline for scoring single
+amino-acid variants with a pretrained protein language model. It states its inputs,
+model, evaluation, and limitations explicitly.
+
+**Pipeline.**
+
+```text
+ inputs : sequences (FASTA) + variant table (pos, wt, mut) + labels
+    |
+    v
+ model  : ESM-2 pretrained checkpoint (HuggingFace)
+          masked-marginal scoring, no task-specific training
+    |
+    v
+ scores : delta log-probability (mutant minus wild type) per variant
+    |
+    v
+ eval   : rank variants -> AUROC (binary) / Spearman (continuous fitness)
+    |
+    v
+ caveat : sequence only; scores uncalibrated; homologs excluded from splits
+```
+
+**Inputs.** A set of protein sequences in FASTA format, each with a table of
+single-residue substitutions given as (position, wild-type residue, mutant residue),
+together with a label column. Labels are either binary (benign/pathogenic or
+active/inactive) or continuous (an experimental fitness value). In a real study the
+labels would come from a curated source; here the procedure is described so it can
+be applied to whatever labeled set the reader has.
+
+**Model.** A pretrained ESM-2 checkpoint is loaded without any task-specific
+training [@lin2023evolutionary]. Scoring is zero-shot: for each variant the wild-type
+residue at that position is masked, the model's log-probability of the mutant and of
+the wild-type residue is read, and the score is their difference. Formally, for a
+variant $v$ at position $i$ of a sequence $\mathbf{a}$ with wild-type residue $a_i\in
+\mathcal{V}_{\mathrm{aa}}$ and mutant residue $a_i'$, the scoring function the case
+study ranks is
+
+$$
+s(v)=\log p_\theta\!\left(a_i'\mid\mathbf{a}_{\setminus i}\right)
+-\log p_\theta\!\left(a_i\mid\mathbf{a}_{\setminus i}\right),
+$$ {#eq-ch14-case-score}
+
+where $\mathbf{a}_{\setminus i}$ is the sequence with position $i$ masked and $\theta$
+are the frozen ESM-2 parameters. This is exactly the masked-marginal score of
+@eq-ch14-vep-score; @eq-ch14-case-score fixes it as the single quantity the pipeline ranks and
+evaluates. A larger $s(v)$ means the model finds the mutant residue more plausible
+than the wild-type residue in its sequence context.
+
+```python
+from transformers import AutoTokenizer, AutoModelForMaskedLM
+import torch
+
+tok = AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
+model = AutoModelForMaskedLM.from_pretrained("facebook/esm2_t33_650M_UR50D").eval()
+
+def masked_marginal(seq, pos, wt, mut):
+    enc = tok(seq, return_tensors="pt")
+    mask_idx = pos + 1  # +1 for the CLS token
+    enc["input_ids"][0, mask_idx] = tok.mask_token_id
+    with torch.no_grad():
+        logits = model(**enc).logits[0, mask_idx]
+    logp = logits.log_softmax(-1)
+    return (logp[tok.convert_tokens_to_ids(mut)]
+            - logp[tok.convert_tokens_to_ids(wt)]).item()
+```
+
+**Evaluation.** Rank all variants by score. Report AUROC if labels are binary and
+Spearman correlation if they are continuous, on a **held-out** split. For a uniformly
+drawn positive–negative variant pair the two statistics are
+
+$$
+\mathrm{AUROC}=P\!\left(s^{+}>s^{-}\right)+\tfrac{1}{2}P\!\left(s^{+}=s^{-}\right),
+\qquad
+\rho_s=1-\frac{6\sum_{i=1}^{n}d_i^{2}}{n(n^{2}-1)},
+$$ {#eq-ch14-metrics}
+
+where $s^{+}$ and $s^{-}$ are the scores of a positive and a negative variant, $n$ is
+the number of variants, and $d_i$ is the difference between the two ranks of variant
+$i$ (the tie-corrected form is used in practice). Both statistics of @eq-ch14-metrics
+depend only on the ordering of the scores, which is why they are unaffected by the
+calibration problem noted below. Because
+pretraining corpora contain many homologs, the split must be at the level of
+sequence identity (cluster-then-split), not at the level of individual variants;
+otherwise homologous sequences appear in both the "training" distribution and the
+test set and inflate the score. Report results against a baseline such as
+substitution-matrix scores and state whether the test proteins share any detectable
+homology with those seen during pretraining.
+
+**Interpretation.** A high AUROC means the score *ranks* labeled variants well on
+this set. It does not mean the model identifies causal mechanisms, nor that the same
+threshold applies to another protein. Report the score distribution, the identity of
+the hardest cases, and the overlap between test proteins and pretraining data.
+
+**Limitations.** The workflow uses sequence only, so it cannot see structural
+contacts, ligand context, or post-translational modifications. It assumes
+independence between positions and ignores epistasis. Zero-shot scores are
+uncalibrated across proteins, so a fixed cutoff is not portable. Performance is
+weakest for variants in disordered regions and for proteins under-represented in the
+pretraining corpus. Finally, any labels drawn from a database that also informed the
+pretraining data risk circularity. These limitations are not incidental; they
+determine when the ranking should inform a decision and when it should only
+prioritize experiments.
+
+Reproducing the pipeline requires pinning the model revision, the tokenizer, and the
+label source: small differences in masking convention or in which protein isoform is
+used change scores enough to affect conclusions, so the exact checkpoint and scoring
+code should be recorded with any result.
+
+::: {.callout-tip}
+## Key Takeaways
+
+- Every application is a triple of representation, downstream model, and metric;
+  the metric must match the question [@rao2019evaluating].
+- Protein variant effects can be scored zero-shot from language-model likelihoods
+  [@lin2023evolutionary], from structural context [@brandes2023genome], or from
+  generative evolutionary densities [@frazer2021disease], and the methods disagree.
+- Drug discovery uses embeddings as filters — property models, screening ranks, and
+  repurposing hypotheses — that require experimental or prospective confirmation
+  [@stokes2020deep; @himmelstein2017systematic].
+- Homology-free function annotation is powerful but is measured against
+  database-derived labels, so generalization claims need homology-aware splits
+  [@bileschi2022using; @yu2023enzyme].
+- Antibody and protein engineering are judged by wet-lab assays, not computational
+  scores alone [@hie2024efficient; @dauparas2022robust].
+- For clinical embeddings, integration quality is metric-dependent and batch
+  leakage can masquerade as biology [@luecken2022benchmarking].
+:::
+
+## Further Reading
+
+- Brandes et al. (2023), *Genome-wide prediction of disease variant effects*,
+  Nature Genetics, doi:10.1038/s41588-023-01465-0 [@brandes2023genome].
+- Frazer et al. (2021), *Disease variant prediction with deep generative models of
+  evolutionary data*, Nature, doi:10.1038/s41586-021-04043-8 [@frazer2021disease].
+- Stokes et al. (2020), *A Deep Learning Approach to Antibiotic Discovery*, Cell,
+  doi:10.1016/j.cell.2020.01.021 [@stokes2020deep].
+- Hie et al. (2024), *Efficient evolution of human antibodies from general protein
+  language models*, Nature Biotechnology, doi:10.1038/s41587-023-01763-2
+  [@hie2024efficient].
+- Yu et al. (2023), *Enzyme function prediction using contrastive learning*,
+  Science, doi:10.1126/science.adf2465 [@yu2023enzyme].
+- Avsec et al. (2021), *Effective gene expression prediction from sequence by
+  integrating long-range interactions*, Nature Methods,
+  doi:10.1038/s41592-021-01252-x [@avsec2021effective].

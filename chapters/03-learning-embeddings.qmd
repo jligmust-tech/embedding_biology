@@ -2,9 +2,498 @@
 title: "Learning Embeddings: from PCA to Deep Networks"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 3*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+Chapter 2 treats an embedding as a finished object and asks what its geometry
+means. This chapter asks the prior question: where does the embedding come from?
+Every embedding is the solution to an optimization problem. A model is trained to
+place biological entities in a low-dimensional space so that a chosen objective —
+reconstruction, co-occurrence prediction, likelihood, or instance discrimination —
+is minimized or maximized. The design choices that matter most are the choice of
+objective and the data it is evaluated on, not the size of the network. The
+chapter moves from objectives that admit closed-form or convex solutions (matrix
+factorization, spectral methods) to shallow neural predictors (word2vec, GloVe,
+node2vec), to reconstruction-based deep models (autoencoders, variational
+autoencoders), to the contrastive and masked-prediction objectives that underpin
+modern biological foundation models.
+
+Following Appendix A, vectors are bold lowercase ($\mathbf{x}$, $\mathbf{z}$),
+matrices are bold uppercase ($\mathbf{X}$, $\mathbf{W}$), scalars are italic
+($n$, $d$, $k$, $\tau$), model parameters are collected in $\theta$, and the
+$\ell_2$ norm is $\lVert\cdot\rVert_2$. A data matrix is
+$\mathbf{X}\in\mathbb{R}^{n\times d}$ with rows $\mathbf{x}_1,\dots,\mathbf{x}_n$;
+an embedding is $\mathbf{z}_i\in\mathbb{R}^{k}$ with $k\ll d$; $\langle\cdot,\cdot\rangle$
+is the inner product, $\sigma(t)=1/(1+e^{-t})$ is the logistic sigmoid, and
+$D_{\mathrm{KL}}$ and $I$ denote the Kullback--Leibler divergence and mutual
+information.
+
+# Matrix Factorization and Spectral Methods
+
+The oldest learned embeddings come from linear algebra. They need no gradient
+descent and no dataset beyond a matrix of observations or similarities.
+
+::: {.callout-note}
+## Definition
+**Latent space.** A latent space is a lower-dimensional coordinate system
+$\mathbf{z} \in \mathbb{R}^k$ inferred from observed data $\mathbf{x} \in \mathbb{R}^d$ with
+$k \ll d$, chosen so that the coordinates retain the structure the objective
+rewards. An embedding is the map $\mathbf{x} \mapsto \mathbf{z}$ together with the
+coordinates it produces.
 :::
 
-TODO
+## Principal Component Analysis and the Eckart--Young Theorem
+
+Given a centered data matrix $\mathbf{X} \in \mathbb{R}^{n \times d}$ with rows
+$\mathbf{x}_1,\dots,\mathbf{x}_n$, sample mean
+$\bar{\mathbf{x}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{x}_i$, and sample covariance
+$\boldsymbol{\Sigma} = \frac{1}{n}\sum_{i=1}^{n}(\mathbf{x}_i-\bar{\mathbf{x}})(\mathbf{x}_i-\bar{\mathbf{x}})^\top$,
+principal component analysis (PCA) [@pearson1901lines] seeks an orthonormal
+projection $\mathbf{W} \in \mathbb{R}^{d \times k}$ with
+$\mathbf{W}^\top\mathbf{W} = \mathbf{I}_k$ solving
+
+$$
+\mathbf{W}^\star
+= \arg\max_{\mathbf{W}^\top \mathbf{W} = \mathbf{I}_k} \; \operatorname{tr}\!\left(\mathbf{W}^\top \boldsymbol{\Sigma} \mathbf{W}\right)
+\;=\; \arg\min_{\mathbf{W}^\top \mathbf{W} = \mathbf{I}_k} \; \frac{1}{n}\sum_{i=1}^{n}
+\left\lVert (\mathbf{x}_i-\bar{\mathbf{x}}) - \mathbf{W} \mathbf{W}^\top (\mathbf{x}_i-\bar{\mathbf{x}}) \right\rVert_2^2,
+$$ {#eq-ch03-pca}
+
+where $\mathbf{I}_k$ is the $k \times k$ identity and the $k$ columns of
+$\mathbf{W}$ are the leading principal directions. Object (@eq-ch03-pca) states the
+same optimizer $\mathbf{W}^\star$ two ways: it maximizes the
+projected variance on the left and minimizes the residual reconstruction error on
+the right, and the two problems have the same solution because the total variance is fixed. To see the
+equivalence, use the orthogonality identity
+$\lVert(\mathbf{x}_i-\bar{\mathbf{x}}) - \mathbf{W}\mathbf{W}^\top(\mathbf{x}_i-\bar{\mathbf{x}})\rVert_2^2
+= \lVert \mathbf{x}_i-\bar{\mathbf{x}}\rVert_2^2 - \lVert \mathbf{W}^\top(\mathbf{x}_i-\bar{\mathbf{x}})\rVert_2^2$,
+which holds whenever $\mathbf{W}^\top\mathbf{W}=\mathbf{I}_k$; summing over $i$ and
+dividing by $n$ shows that the residual is
+$\operatorname{tr}(\boldsymbol{\Sigma}) - \operatorname{tr}(\mathbf{W}^\top\boldsymbol{\Sigma}\mathbf{W})$,
+so minimizing the residual is the same as maximizing the retained variance. The
+Eckart--Young theorem states that this optimum, and the best rank-$k$ approximation
+of any matrix in the Frobenius norm, is obtained by truncating the singular value
+decomposition [@eckart1936approximation]. PCA is therefore a learned embedding whose
+coordinates are the projections $\mathbf{z}_i = \mathbf{W}^\top(\mathbf{x}_i-\bar{\mathbf{x}})$,
+and it remains the canonical baseline whenever a new embedding claims to capture
+biological signal. Its assumptions are a linear subspace, centered isotropic
+noise, and a squared error that penalizes large residuals; it fails, in the sense
+of capturing little variance, when the data lie on a curved manifold or when
+variance along a direction is dominated by an uninformative nuisance factor such as
+batch.
+
+## Latent Semantic Analysis
+
+Latent semantic analysis (LSA) applies the same factorization to a sparse
+term--document count matrix, weighting counts and truncating the singular value
+decomposition to embed terms and documents in a shared space [@deerwester1990indexing].
+Its biological analogues replace terms and documents with biological pairs: genes
+and samples, codons and proteins, or nodes and contexts. LSA shows the central
+pattern that recurs throughout the chapter — an embedding can be read off any
+large co-occurrence matrix whose low-rank structure is meaningful.
+
+## Spectral Embedding
+
+Spectral methods embed the vertices of a graph directly. Given a symmetric
+affinity matrix $\mathbf{W} \in \mathbb{R}^{n \times n}$ with $W_{ij} \geq 0$
+(following Appendix A's overloading of this letter, $\mathbf{W}$ here is graph
+affinity, not the PCA projection above), degree matrix
+$\mathbf{D} = \operatorname{diag}(D_{11},\dots,D_{nn})$ with
+$D_{ii} = \sum_j W_{ij}$, and graph Laplacian $\mathbf{L} = \mathbf{D} - \mathbf{W}$,
+Laplacian eigenmaps choose coordinates $\mathbf{y}_1,\dots,\mathbf{y}_n \in \mathbb{R}^k$,
+stacked as the rows of $\mathbf{Y} \in \mathbb{R}^{n \times k}$, minimizing
+
+$$
+\frac{1}{2}\sum_{i,j} W_{ij} \left\lVert \mathbf{y}_i - \mathbf{y}_j \right\rVert_2^2
+= \operatorname{tr}\!\left(\mathbf{Y}^\top \mathbf{L}\, \mathbf{Y}\right)
+\quad \text{subject to} \quad \mathbf{Y}^\top \mathbf{D}\, \mathbf{Y} = \mathbf{I}_k,
+$$ {#eq-ch03-laplacian}
+
+where the rows of $\mathbf{Y}$ are the vertex embeddings and the factor
+$\tfrac12$ is the usual convention that makes the two sides equal (the objective is
+defined only up to a positive constant) [@belkin2003laplacian]. The equality is the
+identity $\tfrac12\sum_{i,j}W_{ij}\lVert\mathbf{y}_i-\mathbf{y}_j\rVert_2^2
+= \operatorname{tr}(\mathbf{Y}^\top(\mathbf{D}-\mathbf{W})\mathbf{Y})$; the
+constraint $\mathbf{Y}^\top\mathbf{D}\mathbf{Y}=\mathbf{I}_k$ prevents collapse to
+the trivial solution, and the optimizer is obtained from the smallest generalized
+eigenvectors of $(\mathbf{L}, \mathbf{D})$ after discarding the constant
+eigenvector. The objective is minimized over $\mathbf{Y}$, and it penalizes large
+displacement across heavily weighted edges, so the embedding is smooth over the
+graph. This formulation is the direct ancestor of the graph neural networks in
+Chapter 10 and of the random-walk objectives below.
+
+# Shallow Prediction Methods
+
+A second family keeps the objective stochastic: instead of factoring a fixed
+matrix, the model predicts one entity from another observed nearby and is trained
+by gradient descent on mini-batches.
+
+## word2vec
+
+word2vec learns vectors by predicting context. The continuous bag-of-words
+(CBOW) variant predicts a center word from its context, while skip-gram predicts
+context words from a center word [@mikolov2013efficient]. Training with full
+softmax is expensive, so the skip-gram with negative sampling (SGNS) objective
+replaces it with binary classification between observed and sampled pairs. Let
+$\mathbf{u}_w \in \mathbb{R}^{d}$ and $\mathbf{v}_c \in \mathbb{R}^{d}$ be the input
+("center") and output ("context") vectors of word $w$ and context $c$,
+$\mathcal{D}$ the set of observed (center, context) pairs, $K$ the number of
+negatives, and $P_n$ a smoothed unigram noise distribution. SGNS maximizes
+
+$$
+\mathcal{L}_{\text{SGNS}}(\{\mathbf{u}\},\{\mathbf{v}\})
+= \sum_{(w,c) \in \mathcal{D}}
+\Big[ \log \sigma(\mathbf{u}_w^\top \mathbf{v}_c)
++ \sum_{j=1}^{K} \mathbb{E}_{c_j \sim P_n}\!
+\big( \log \sigma(-\mathbf{u}_w^\top \mathbf{v}_{c_j}) \big) \Big],
+$$ {#eq-ch03-sgns}
+
+over the two embedding tables $\{\mathbf{u}_w\}$ and $\{\mathbf{v}_c\}$; the first
+term rewards observed pairs, the second penalizes sampled non-pairs, and
+$\sigma$ is the logistic sigmoid. The quantity being maximized is a per-pair
+log-likelihood, so SGNS is a maximum-likelihood estimator of a two-class
+discriminator, not a loss to be minimized in the usual sense. Levy and Goldberg
+show that the optimum of (@eq-ch03-sgns) satisfies an implicit factorization: for each
+observed pair the inner product equals a shifted pointwise mutual information
+[Levy & Goldberg, @levy2014neural],
+
+$$
+\mathbf{u}_w^\top \mathbf{v}_c
+= \operatorname{PMI}(w,c) - \log K,
+\qquad
+\operatorname{PMI}(w,c) = \log \frac{p(w,c)}{p(w)\,p(c)},
+$$ {#eq-ch03-sgns-pmi}
+
+where $p(w,c)$, $p(w)$, and $p(c)$ are the empirical pair and marginal
+probabilities induced by the corpus. The step from (@eq-ch03-sgns) to (@eq-ch03-sgns-pmi) is
+the stationary condition of the per-pair logistic loss: at the optimum the model's
+implied conditional $\sigma(\mathbf{u}_w^\top\mathbf{v}_c)$ matches the empirical
+ratio of observed to sampled co-occurrence, which rearranges to the shift
+$-\log K$; increasing the number of negatives therefore shifts every cell of the
+factorized matrix by a constant, which is why $K$ is held fixed when comparing
+embeddings [@levy2014neural]. This identity links the word2vec family back to the
+spectral methods above: SGNS is a low-rank factorization of a shifted PMI matrix,
+and it fails to distinguish relations whose PMI values coincide.
+
+## GloVe
+
+GloVe dispenses with sampling and instead fits a linear relation to global
+co-occurrence counts. With $X_{ij}$ the number of times word $j$ occurs in the
+context of word $i$, GloVe minimizes
+
+$$
+\mathcal{L}_{\text{GloVe}}
+= \sum_{i,j} f(X_{ij})
+\left( \mathbf{w}_i^\top \tilde{\mathbf{w}}_j + b_i + \tilde{b}_j - \log X_{ij} \right)^2,
+$$ {#eq-ch03-glove}
+
+over the word vectors $\mathbf{w}_i \in \mathbb{R}^d$, the context vectors
+$\tilde{\mathbf{w}}_j \in \mathbb{R}^d$, and the scalar biases $b_i, \tilde{b}_j$,
+where $f$ is a weighting function that downweights very frequent pairs while
+keeping low-count pairs informative [@pennington2014glove]. (@eq-ch03-glove) is
+minimized, and its minimizer sets
+$\mathbf{w}_i^\top\tilde{\mathbf{w}}_j = \log X_{ij} - b_i - \tilde{b}_j$, so the
+biases absorb frequency effects and the final embedding is typically
+$\mathbf{w}_i + \tilde{\mathbf{w}}_i$. The assumptions are that the log of
+co-occurrence is bilinear in the two embeddings and that $X_{ij}=0$ entries carry
+no information (they are dropped); the objective is therefore undefined on
+zero-count pairs and must be trained only on observed cells.
+
+## node2vec
+
+Shallow methods transfer to graphs by treating graph walks as sentences and
+vertices as words. node2vec generates second-order random walks controlled by
+return and in-out parameters $p$ and $q$, then maximizes the SGNS objective
+(@eq-ch03-sgns) over the (vertex, context) pairs in those walks [@grover2016node2vec].
+The parameters interpolate between breadth-first walks that preserve community
+structure ($q>1$) and depth-first walks that preserve structural roles ($q<1$).
+The earlier DeepWalk algorithm uses uniform random walks with a similar objective
+[@perozzi2014deepwalk], and LINE optimizes first- and second-order proximity
+objectives separately [@tang2015line]. GraphSAGE generalizes the idea to inductive
+settings by learning aggregator functions rather than a fixed table of node
+vectors [@hamilton2017inductive]. Chapter 10 treats these graph-specific methods in
+full.
+
+# Autoencoders and Variational Autoencoders
+
+Shallow objectives scale poorly to continuous inputs such as expression profiles
+or structures, where the prediction targets are not discrete vocabulary items.
+Reconstruction-based models replace prediction with an information bottleneck.
+
+::: {.callout-note}
+## Definition
+**Autoencoder.** An autoencoder is a pair of functions
+$f_\phi: \mathbb{R}^d \to \mathbb{R}^k$ (encoder) and
+$g_\theta: \mathbb{R}^k \to \mathbb{R}^d$ (decoder) with parameters $\phi$ and
+$\theta$, trained so that the composition $g_\theta \circ f_\phi$ reconstructs its
+input. The bottleneck activation $f_\phi(\mathbf{x})$ is the embedding.
+:::
+
+A basic autoencoder minimizes the reconstruction loss
+
+$$
+\mathcal{L}_{\text{AE}}(\phi, \theta)
+= \frac{1}{n} \sum_{i=1}^{n}
+\left\lVert \mathbf{x}_i - g_\theta\!\left(f_\phi(\mathbf{x}_i)\right) \right\rVert_2^2,
+$$ {#eq-ch03-ae}
+
+over $\phi$ and $\theta$; the bottleneck width $k < d$ forces compression and the
+squared error is the negative log-likelihood under a Gaussian decoder
+[@hinton2006reducing]. If $f_\phi$ and $g_\theta$ are linear with tied weights, the
+optimum of (@eq-ch03-ae) recovers the PCA subspace of (@eq-ch03-pca) by the Eckart--Young
+theorem [@eckart1936approximation]; nonlinear encoders therefore learn a curved
+manifold. Denoising autoencoders improve the representation by requiring recovery
+of a clean input $\mathbf{x}$ from a corrupted copy $\tilde{\mathbf{x}}$, which
+prevents the identity map and encourages robustness to noise
+[@vincent2008extracting]. The failure mode to guard against is trivial
+memorization: with $k\ge d$ or overly powerful decoders, (@eq-ch03-ae) is minimized by
+the identity, so compression and noise injection are essential.
+
+The variational autoencoder (VAE) turns the deterministic bottleneck into a
+distribution and trains a generative model. With prior $p(\mathbf{z})$, likelihood
+$p_\theta(\mathbf{x} \mid \mathbf{z})$, and approximate posterior
+$q_\phi(\mathbf{z} \mid \mathbf{x})$, the VAE maximizes the evidence lower bound
+(ELBO):
+
+$$
+\mathcal{L}_{\text{VAE}}(\theta, \phi)
+= \mathbb{E}_{q_\phi(\mathbf{z} \mid \mathbf{x})}
+\!\left[ \log p_\theta(\mathbf{x} \mid \mathbf{z}) \right]
+- D_{\mathrm{KL}}\!\left( q_\phi(\mathbf{z} \mid \mathbf{x}) \,\Vert\, p(\mathbf{z}) \right)
+\;\leq\; \log p_\theta(\mathbf{x}),
+$$ {#eq-ch03-vae}
+
+where the first term rewards accurate reconstruction, the second term is the
+Kullback--Leibler divergence between the approximate posterior and the prior, and
+reparameterization makes the bound differentiable [@kingma2014auto]. (@eq-ch03-vae) is maximized over the decoder parameters $\theta$ and encoder parameters
+$\phi$. The bound itself is immediate from Jensen's inequality, because
+
+$$
+\log p_\theta(\mathbf{x})
+= \log \mathbb{E}_{q_\phi(\mathbf{z}\mid\mathbf{x})}\!\left[
+\frac{p_\theta(\mathbf{x}\mid\mathbf{z})\,p(\mathbf{z})}{q_\phi(\mathbf{z}\mid\mathbf{x})}
+\right]
+\;\geq\;
+\mathbb{E}_{q_\phi(\mathbf{z}\mid\mathbf{x})}\!\left[\log p_\theta(\mathbf{x}\mid\mathbf{z})\right]
+- D_{\mathrm{KL}}\!\left(q_\phi(\mathbf{z}\mid\mathbf{x})\,\Vert\,p(\mathbf{z})\right),
+$$ {#eq-ch03-elbo}
+
+and the gap between the two sides is exactly
+$D_{\mathrm{KL}}(q_\phi(\mathbf{z}\mid\mathbf{x})\,\Vert\,p_\theta(\mathbf{z}\mid\mathbf{x}))$,
+which vanishes only when the approximate posterior equals the true posterior. Thus
+the ELBO is reconstruction minus a KL regularizer, and the two terms compete: a
+flexible $q_\phi$ that matches the prior earns a small KL penalty but may ignore
+$\mathbf{x}$, whereas a $q_\phi$ that is informative about $\mathbf{x}$ helps
+reconstruction but pays KL. In the extreme of *posterior collapse*, the KL term
+dominates and $q_\phi(\mathbf{z}\mid\mathbf{x})\approx p(\mathbf{z})$, so the latent
+code carries no information about the input. The latent mean serves as the
+embedding. Because the objective is a proper likelihood, VAEs underpin the
+probabilistic single-cell models of Chapter 8; the trade-off is that
+reconstruction and the KL term compete, producing blurrier reconstructions than
+adversarial or contrastive models.
+
+# Contrastive and Metric Learning
+
+Contrastive objectives learn embeddings by requiring similar items to be close
+and dissimilar items to be far apart, without reconstructing inputs.
+
+::: {.callout-note}
+## Definition
+**Contrastive learning.** Contrastive learning trains an encoder by forming
+*positive* pairs (two views or instances that should map nearby) and *negative*
+pairs (instances that should map apart), then optimizing a loss over their
+similarities in the embedding space.
+:::
+
+Contrastive predictive coding introduced the InfoNCE objective, which treats
+prediction of a future latent state among negative samples as a
+$K$-way classification problem [@vandenoord2018representation]. For an anchor
+$\mathbf{x}$, a positive $\mathbf{x}^{+}$, and $K$ negatives $\mathbf{x}^{-}_j$,
+drawn jointly, with encoder $f_\theta$ and temperature $\tau > 0$, the loss is
+
+$$
+\mathcal{L}_{\text{InfoNCE}}(\theta)
+= -\,\mathbb{E}\!\left[
+\log \frac{\exp\!\left(f_\theta(\mathbf{x})^\top f_\theta(\mathbf{x}^{+}) / \tau\right)}
+{\exp\!\left(f_\theta(\mathbf{x})^\top f_\theta(\mathbf{x}^{+}) / \tau\right)
++ \sum_{j=1}^{K} \exp\!\left(f_\theta(\mathbf{x})^\top f_\theta(\mathbf{x}^{-}_j) / \tau\right)}
+\right],
+$$ {#eq-ch03-infonce}
+
+where $\tau$ controls the sharpness of the distribution and the ratio is the
+model's estimate of whether the positive is more compatible with the anchor than
+the negatives. (@eq-ch03-infonce) is minimized over the encoder parameters
+$\theta$ (and any projection head); for any critic the loss satisfies
+
+$$
+\mathcal{L}_{\text{InfoNCE}}(\theta)
+\;\geq\; \log (K+1) - I\!\left(\mathbf{x}; \mathbf{x}^{+}\right),
+$$ {#eq-ch03-infonce-mibound}
+
+with equality when $f_\theta$ realizes the optimal density ratio
+$p(\mathbf{x},\mathbf{x}^{+})/(p(\mathbf{x})p(\mathbf{x}^{+}))$
+[@vandenoord2018representation]. Minimizing (@eq-ch03-infonce) therefore maximizes the
+right-hand side, i.e. a lower bound on the mutual information between anchor and
+positive; the bound improves with more negatives $K$ and with a critic that
+approximates the true density ratio, which is why batch size and negative-sampling
+strategy matter. The bound is also the failure mode: when negatives are chosen
+from the same class as the positive (*false negatives*), the true mutual
+information is penalized and the learned geometry degrades.
+
+The triplet loss is the metric-learning precursor of the same idea. Given an
+anchor $a$, a positive $p$, a negative $n$, and a margin $m > 0$,
+
+$$
+\mathcal{L}_{\text{triplet}}(\theta)
+= \sum_{(a,p,n)} \max\!\left(
+\left\lVert f_\theta(a) - f_\theta(p) \right\rVert_2^2
+- \left\lVert f_\theta(a) - f_\theta(n) \right\rVert_2^2 + m, \; 0
+\right),
+$$ {#eq-ch03-triplet}
+
+which is minimized over $\theta$; the margin enforces a fixed gap between the
+positive and negative squared distances, and the loss is zero once the positive is
+closer than the negative by at least $m$ [@schroff2015facenet]. Large-margin
+nearest-neighbor methods define the same geometry with a learned Mahalanobis
+metric [@weinberger2009distance]. The requirement is that at least one negative be
+sampled per anchor; without informative negatives the objective is trivially
+satisfied and the encoder may collapse all points to a single location.
+
+SimCLR popularized a simplified recipe: apply two augmentations to each input,
+treat the two views as a positive pair, and use the remaining batch members as
+negatives with a temperature-scaled cross-entropy loss, i.e. (@eq-ch03-infonce) with
+$f_\theta$ composed of the encoder and a small projection head [@chen2020simple].
+This "augment, embed, contrast" pattern is central to biological foundation models
+because it needs no labels and no reconstruction, and because domain-specific
+augmentations — reverse-complementing DNA, masking residues, perturbing structures
+— encode biological invariances directly into the objective.
+
+# Self-Supervised Pretraining, Fine-Tuning, and Linear Probing
+
+Contrastive and reconstruction objectives are instances of self-supervised
+learning, in which supervision is derived from the data itself rather than from
+labels.
+
+::: {.callout-note}
+## Definition
+**Self-supervised pretraining.** Self-supervised pretraining trains an encoder on
+a large unlabeled corpus using a surrogate objective built from the data, after
+which the encoder is adapted to downstream tasks. *Fine-tuning* updates all
+parameters on labeled data; *linear probing* freezes the encoder and fits only a
+linear classifier on its embeddings.
+:::
+
+The standard pipeline has three stages. First, the encoder is pretrained on a
+large corpus with a self-supervised objective. Second, the encoder is either
+frozen (probing) or updated (fine-tuning) on a smaller labeled dataset. Third, the
+frozen or adapted embeddings feed a downstream head for classification,
+regression, or retrieval. Formally, with a frozen encoder $f_\theta$ and a linear
+head $g_{\mathrm{head}}(\mathbf{z}) = \operatorname{softmax}(\mathbf{W}_{\text{head}}\mathbf{z})$
+for $\mathbf{W}_{\text{head}}\in\mathbb{R}^{C\times k}$ and $C$ classes, probing minimizes the
+cross-entropy $\sum_i -\log g_{\mathrm{head}}(f_\theta(\mathbf{x}_i))_{y_i}$ over
+$\mathbf{W}_{\text{head}}$ alone, whereas fine-tuning minimizes the same loss over $\theta$ and
+$\mathbf{W}_{\text{head}}$ jointly. Linear probing therefore measures what is already linearly
+accessible in the representation, whereas fine-tuning measures what the encoder
+can learn given the task; a large gap between the two indicates that the
+representation encodes the relevant information but not in a linearly separable
+form.
+
+::: {#fig-pretrain}
+**Figure description.** The pretrain → adapt → evaluate pipeline. A large
+unlabeled corpus (sequences, structures, graphs) feeds a self-supervised
+objective (contrastive, reconstruction, or masked prediction) that trains an
+encoder. The trained encoder is then either frozen and paired with a linear probe,
+or fine-tuned jointly with a task head on labeled data. Both routes produce a
+downstream prediction, and the difference between probe and fine-tune accuracy is
+interpreted as the linear accessibility of the pretrained features.
+:::
+
+# Masked Language Modeling for Biological Sequences
+
+The dominant self-supervised objective for sequence models is masked language
+modeling (MLM). A fraction of input tokens is replaced with a mask token, and the
+model predicts the masked tokens from their context:
+
+$$
+\mathcal{L}_{\text{MLM}}(\theta)
+= - \sum_{i \in \mathcal{M}}
+\log p_\theta\!\left( x_i \mid \mathbf{x}_{\setminus \mathcal{M}} \right),
+$$ {#eq-ch03-mlm}
+
+where $\mathcal{M}$ is the set of masked positions, $x_i$ is the original token at
+position $i$, $\mathbf{x}_{\setminus \mathcal{M}}$ denotes the observed tokens
+(left and right context), and $p_\theta$ is the model's softmax distribution over
+the token vocabulary [@devlin2019bert]. (@eq-ch03-mlm) is minimized over
+$\theta$, and it is a sum of per-position cross-entropies: the model treats masked
+positions as conditionally independent given the observed tokens, which is an
+approximation, since true token dependencies need not factorize, and it is why
+masking rates and the choice of which positions to mask affect the quality of the
+resulting embeddings. Unlike the causal objective of a generative language model,
+MLM uses bidirectional context, and the resulting [CLS] or pooled hidden states
+serve as sequence embeddings.
+
+The recipe transfers wherever tokens can be defined. DNABERT applies MLM over
+overlapping $k$-mer tokens to the human genome [@ji2021dnabert]; protein language
+models such as ESM apply it to amino-acid sequences and show that the learned
+representations expose structure and function [@rives2021biological], and
+ProtTrans/ProtBERT and ProtT5 do the same across large protein corpora
+[@elnaggar2022prottrans]. Masked prediction is attractive for biological sequence
+data because it requires only raw sequences, tolerates the enormous unlabeled
+corpora available, and produces context-dependent embeddings in which the same
+residue receives different vectors in different neighborhoods. Chapters 4, 5, and
+7 examine the modality-specific instantiations in detail.
+
+# Learning Objectives at a Glance
+
+The required artifact for this chapter is a single view of how each method couples
+an objective to the structure it optimizes. The table below is illustrative of the
+taxonomy and is not a performance comparison.
+
+| Method | Loss (equation) | What it optimizes |
+|:--|:--|:--|
+| PCA / SVD | Projected variance, least-squares residual (@eq-ch03-pca) | Preserved variance; linear subspace |
+| Laplacian eigenmaps | $\operatorname{tr}(\mathbf{Y}^\top \mathbf{L} \mathbf{Y})$ under $\mathbf{Y}^\top \mathbf{D} \mathbf{Y} = \mathbf{I}_k$ (@eq-ch03-laplacian) | Smoothness over a graph's edges |
+| SGNS | Negative-sampling log-likelihood (@eq-ch03-sgns); shifted PMI (@eq-ch03-sgns-pmi) | Co-occurrence predictability |
+| GloVe | Weighted least squares on $\log X_{ij}$ (@eq-ch03-glove) | Global co-occurrence ratios |
+| node2vec | SGNS (@eq-ch03-sgns) on biased random walks | Node community and role structure |
+| Autoencoder | Squared reconstruction (@eq-ch03-ae) | Compressed, faithful representation |
+| VAE | ELBO (@eq-ch03-vae), (@eq-ch03-elbo) | Likelihood of data under a latent prior |
+| InfoNCE / CPC | Contrastive classification (@eq-ch03-infonce); MI bound (@eq-ch03-infonce-mibound) | Mutual information between views |
+| Triplet loss | Margin-based ranking loss (@eq-ch03-triplet) | Relative metric geometry |
+| MLM / BERT | Masked-token cross-entropy (@eq-ch03-mlm) | Bidirectional contextual prediction |
+
+A second artifact, the pretrain → adapt → evaluate pipeline, is shown in
+@fig-pretrain. Together the table and the figure show the recurring motif of this
+chapter: an embedding is only as good as the objective and the invariances that
+objective encodes.
+
+::: {.callout-tip}
+## Key Takeaways
+- Every embedding is the solution to an optimization problem; the objective, not
+  the architecture, determines what the coordinates encode.
+- PCA is the best linear reconstruction (@eq-ch03-pca) and the baseline every learned
+  embedding should be compared against.
+- Shallow prediction methods (SGNS, GloVe, node2vec) are implicitly matrix
+  factorizations of co-occurrence statistics; SGNS factorizes a shifted PMI
+  matrix (@eq-ch03-sgns-pmi).
+- Autoencoders compress deterministically (@eq-ch03-ae), while VAEs optimize a
+  probabilistic bound whose reconstruction and KL terms compete (@eq-ch03-elbo).
+- Contrastive objectives such as InfoNCE (@eq-ch03-infonce) and SimCLR dominate
+  biological foundation models because they need no labels and encode domain
+  invariances through augmentation.
+- Linear probing measures what is already accessible in a representation;
+  fine-tuning measures what the encoder can additionally learn.
+:::
+
+## Further Reading
+
+- Bengio, Courville, and Vincent, *Representation Learning: A Review and New
+  Perspectives* (2013) [@bengio2013representation] — the conceptual frame for
+  learned representations.
+- Levy and Goldberg, *Neural Word Embedding as Implicit Matrix Factorization*
+  (2014) [@levy2014neural] — the bridge between word2vec and spectral methods.
+- Kingma and Welling, *Auto-Encoding Variational Bayes* (2014)
+  [@kingma2014auto] — the primary source for the VAE objective.
+- van den Oord, Li, and Vinyals, *Representation Learning with Contrastive
+  Predictive Coding* (2018) [@vandenoord2018representation] — the origin of
+  InfoNCE.
+- Devlin et al., *BERT* (2019) [@devlin2019bert] — masked language modeling.
+- Rao et al., *Evaluating Protein Transfer Learning with TAPE* (2019)
+  [@rao2019evaluating] — how pretrained biological embeddings are evaluated.

@@ -2,9 +2,394 @@
 title: "Multi-Omics and Multimodal Integration"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 9*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+A modern experiment rarely observes one modality. The same cell or sample can be
+measured by transcriptome, surface protein, chromatin accessibility, spatial
+location, and histology, and each view carries information the others miss. The
+integration problem is to build a representation that is *shared* enough to
+compare and transfer across modalities, yet *specific* enough to preserve what
+each modality uniquely contributes. This chapter covers fusion strategies,
+shared-latent-space models, contrastive alignment, cross-modal translation,
+missing-modality handling, and spatial transcriptomics as a case study.
+
+::: {.callout-note}
+## Definition
+**Multimodal integration** learns a joint representation of two or more data
+modalities measured on the same units (cells, spots, or samples). A **shared
+latent space** contains factors that explain variation common to all modalities;
+**modality-specific** factors explain variation unique to one view. A good
+integration preserves both.
 :::
 
-TODO
+# The Integration Problem: Shared and Modality-Specific Factors
+
+Write each unit $i$ as a set of observations
+$\{\mathbf{x}_i^{(1)},\dots,\mathbf{x}_i^{(M)}\}$ over $M$ modalities, with
+$\mathbf{x}_i^{(m)}\in\mathcal{X}_m$ the measurement of modality $m$. A generative
+view posits a shared latent vector
+$\mathbf{z}_i^{\mathrm{sh}}\in\mathbb{R}^{d_{\mathrm{sh}}}$, per-modality latent
+vectors $\mathbf{z}_i^{(m)}\in\mathbb{R}^{d_m}$, and a covariate vector
+$\mathbf{c}_i$ collecting technical variables such as library size and batch:
+$$
+\mathbf{x}_i^{(m)}
+\;\sim\; p_{\theta_m}\!\left(\,\cdot \mid \mathbf{z}_i^{\mathrm{sh}},\, \mathbf{z}_i^{(m)},\, \mathbf{c}_i\right),
+\qquad m=1,\dots,M,
+$$ {#eq-ch09-factor-model}
+where $\theta_m$ are the decoder parameters of modality $m$ and each
+$p_{\theta_m}$ is a modality-appropriate likelihood (a count model for RNA, a
+Bernoulli for binarized accessibility, and so on). The shared factor drives
+cross-modal prediction and alignment; the private factors absorb modality-specific
+structure. @eq-ch09-factor-model carries one substantive assumption — that the
+modalities are **conditionally independent given the latents**,
+$p(\mathbf{x}_i^{(1)},\dots,\mathbf{x}_i^{(M)}\mid\cdot)=\prod_m p_{\theta_m}(\mathbf{x}_i^{(m)}\mid\cdot)$
+— which is what licenses a separate likelihood term per modality during inference.
+This decomposition is the organizing idea behind every method in this chapter,
+whether it is fit by factor analysis [@argelaguet2020mofa] or by a deep generative
+model [@ashuach2023multivi; @gong2021cobolt].
+
+::: {.callout-note}
+## Definition
+**Fusion strategy** describes *where* modalities are combined: **early fusion**
+concatenates features before modeling, **late fusion** trains per-modality models
+and combines their outputs, and **intermediate fusion** combines learned
+representations inside a model, producing a shared latent space.
+:::
+
+The recurring trade-off is quantitative, not merely conceptual. Let
+$I(\cdot;\cdot)$ denote mutual information and $H(\cdot\mid\cdot)$ conditional
+entropy (Appendix A), and let $\mathbf{x}^{(m)}$ denote the (random) modality-$m$
+profile of a unit. For two modalities the dependence decomposes as
+$$
+I\big(\mathbf{x}^{(1)};\mathbf{x}^{(2)}\big)
+= H\big(\mathbf{x}^{(1)}\big) - H\big(\mathbf{x}^{(1)}\mid\mathbf{x}^{(2)}\big),
+$$ {#eq-ch09-mi-decomp}
+where $H(\mathbf{x}^{(1)}\mid\mathbf{x}^{(2)})$ is exactly the component of
+modality 1 that is *unique* to it. Any representation
+$\mathbf{z}=g(\mathbf{x}^{(1)})$ built from modality 1 alone satisfies, by the
+data-processing inequality,
+$$
+I\big(\mathbf{z};\mathbf{x}^{(2)}\big)\;\le\;I\big(\mathbf{x}^{(1)};\mathbf{x}^{(2)}\big),
+$$ {#eq-ch09-dpi}
+so an encoder optimized only for cross-modal agreement can recover at most the
+shared term of @eq-ch09-mi-decomp, and the private term
+$H(\mathbf{x}^{(1)}\mid\mathbf{x}^{(2)})$ is invisible to it. The right operating
+point depends on whether the downstream task needs transfer between modalities
+(favor the shared term) or within-modality resolution (retain the private terms).
+A useful way to make the trade-off concrete is to ask, for a candidate embedding,
+three measurable questions: (i) how much of modality 2 can be predicted from the
+shared space learned from modality 1 alone, measured by
+$I(\mathbf{z};\mathbf{x}^{(2)})$ (alignment / transfer); (ii) how much
+within-modality structure is preserved when the shared space is the only feature,
+measured by $I(\mathbf{z}^{(1)};\mathbf{x}^{(1)})$ for the private representation
+$\mathbf{z}^{(1)}$ (resolution / information retention); and (iii) how much
+cross-modal *unique* signal is confined to a private factor, measured by
+$H(\mathbf{x}^{(1)}\mid\mathbf{x}^{(2)})$ (specificity). By @eq-ch09-dpi no
+single embedding maximizes all three, which is why the choice is task-dependent
+rather than universal.
+
+Different modality pairs also pose different difficulties:
+
+| Modality pair | Example assay | Main difficulty |
+|---|---|---|
+| RNA + protein | CITE-seq [@stoeckius2017simultaneous] | Count models differ (NB vs. protein); shared space must reconcile scales |
+| RNA + chromatin | 10x Multiome | Very different sparsity and dimensionality; binary vs. count |
+| Expression + space | Spatial transcriptomics [@biancalani2021deep; @hu2021spagcn] | Reference has no coordinates; alignment is a matching problem |
+| Expression + histology | Spatial imaging | Continuous image features vs. discrete counts |
+| Sequence + structure | AlphaFold-era data [@jumper2021highly] | Alignment across a prediction, not an observation |
+
+# Fusion Strategies and Shared-Latent-Space Models
+
+## A comparison of fusion strategies
+
+| Strategy | How it works | Strengths | Weaknesses | Representative methods |
+|---|---|---|---|---|
+| Early fusion | Concatenate features (or normalize then concatenate) | Simple; one model | Scale/sparsity mismatch; batch-driven; cannot handle missing views | Baseline concatenation + PCA |
+| Late fusion | Predict per modality, combine outputs | Modular; robust to view-specific noise | No shared representation; cannot transfer across modalities | Ensemble WNN-style label voting [@hao2021integrated] |
+| Intermediate (shared-latent) | Encode each view, combine in latent space | Transferable, handles missing views, interpretable factors | Harder to train; alignment vs. privacy trade-off | MOFA+ [@argelaguet2020mofa], MultiVI [@ashuach2023multivi], Cobolt [@gong2021cobolt] |
+| Contrastive alignment | Align paired embeddings with a contrastive loss | Strong cross-modal retrieval; no shared decoder needed | Needs paired data; sensitive to negatives | CLIP-style objectives [@radford2021learning] |
+
+Early fusion is the simplest baseline and has a clear failure mode:
+concatenating RNA counts with protein counts, or with a high-dimensional image
+feature vector, produces a matrix whose geometry is dominated by whichever
+modality has the larger scale and sparsity, and it cannot represent a unit with a
+missing view. Late fusion avoids the scale mismatch but forfeits a shared space
+and therefore cross-modal transfer. Intermediate and contrastive fusion are the
+strategies that provide both.
+
+## MOFA+: factor analysis across modalities
+
+MOFA+ [@argelaguet2020mofa] is a probabilistic factor-analysis model. It
+decomposes each modality's matrix into a small number of factors with
+per-modality weight matrices and per-modality variance terms, learning factors
+that are shared where the data support sharing and inactive where they are not.
+Because it is a linear, Bayesian model, the factors are directly interpretable as
+the axes along which modalities align, and missing views are handled natively
+within the inference. Its limitation is the same as any linear method: nonlinear
+manifold structure in a single modality is not captured.
+
+## MultiVI: deep generative integration with missing modalities
+
+MultiVI [@ashuach2023multivi] extends the scVI likelihood framework
+[@lopez2018deep] to jointly model RNA and ATAC (chromatin accessibility). Each
+modality has its own likelihood — a negative binomial for counts and a Bernoulli
+for binarized accessibility — but both are decoded from a shared latent space. The
+negative binomial here is the non-zero-inflated special case of the zero-inflated
+negative binomial used by scVI in Chapter 8, and each model follows the likelihood
+chosen by its source [@lopez2018deep; @ashuach2023multivi].
+Crucially, MultiVI is trained so that a cell missing one modality still receives a
+latent representation, enabling imputation and integration of partially observed
+data. totalVI [@gayoso2021joint] applies the same principle to RNA plus surface
+protein from CITE-seq [@stoeckius2017simultaneous].
+
+## Cobolt: hierarchical multimodal alignment
+
+Cobolt [@gong2021cobolt] uses a hierarchical variational autoencoder
+[@kingma2014auto] that factorizes each cell into a shared latent and
+modality-specific latents, then aligns the shared components across modalities.
+It was developed in the context of single-nucleus RNA plus ATAC and is designed
+to be robust to modality imbalance — the common case where one modality is much
+larger or noisier than the other.
+
+## Graph-based multimodal integration
+
+Seurat's weighted-nearest-neighbor (WNN) approach [@hao2021integrated] takes a
+different route: it builds a separate neighbor graph per modality, then weights
+the modalities per cell by their local predictive information and combines the
+graphs. This is intermediate fusion on a graph rather than in a Euclidean latent
+space, and it is widely used because it is simple and does not require a
+generative model.
+
+## The shared-latent-space picture
+
+```{mermaid}
+flowchart LR
+  X1["Modality 1: RNA counts"] --> E1["Encoder 1"]
+  X2["Modality 2: protein or ATAC"] --> E2["Encoder 2"]
+  E1 --> S["Shared latent z_shared"]
+  E2 --> S
+  E1 --> P1["Private z_1"]
+  E2 --> P2["Private z_2"]
+  S --> D1["Decoder 1 + likelihood"]
+  S --> D2["Decoder 2 + likelihood"]
+  P1 --> D1
+  P2 --> D2
+```
+
+Every intermediate-fusion method can be read off this figure: modality-specific
+encoders, a bottleneck that is partitioned into shared and private components,
+and modality-specific decoders that force each view to be reconstructable from
+the shared space. The design choices are where to enforce sharing (a loss term, a
+joint factor prior, or a shared decoder) and how to weight reconstruction against
+alignment.
+
+# Contrastive Multimodal Alignment
+
+An alternative to generative fusion is to learn two encoders whose embeddings
+agree for paired observations and disagree otherwise, without ever reconstructing
+inputs. Write $\mathbf{u}_i\in\mathbb{R}^{d}$ and
+$\mathbf{v}_i\in\mathbb{R}^{d}$ for the modality-1 and modality-2 embeddings of
+the $i$-th paired unit in a batch of size $B$, and let $\tau>0$ be a temperature;
+$\langle\cdot,\cdot\rangle$ is the inner product of Appendix A. The **InfoNCE**
+loss [@vandenoord2018representation], also central to SimCLR [@chen2020simple],
+is a $B$-way classification of which $\mathbf{v}$ pairs with a given
+$\mathbf{u}$: for the $i$-th pair it pulls the positive pair
+$(\mathbf{u}_i,\mathbf{v}_i)$ together and pushes the cross pairs
+$(\mathbf{u}_i,\mathbf{v}_j),\,j\neq i$ apart,
+$$
+\mathcal{L}_{\mathrm{InfoNCE}}
+=-\frac1B\sum_{i=1}^{B}
+\log\frac{\exp\!\big(\langle\mathbf{u}_i,\mathbf{v}_i\rangle/\tau\big)}
+{\sum_{j=1}^{B}\exp\!\big(\langle\mathbf{u}_i,\mathbf{v}_j\rangle/\tau\big)} .
+$$ {#eq-ch09-infonce}
+This is not a heuristic: at its optimum InfoNCE bounds the mutual information
+between the paired views from below,
+$I(\mathbf{u};\mathbf{v})\ge\log B-\mathcal{L}_{\mathrm{InfoNCE}}$, so minimizing
+the loss raises a lower bound on the shared information, and a larger batch (more
+negatives) tightens the bound [@vandenoord2018representation]. The bound holds
+because $\mathcal{L}_{\mathrm{InfoNCE}}$ is the cross-entropy of classifying the
+positive among $B$ candidates; its infimum is $\log B-I(\mathbf{u};\mathbf{v})$,
+attained when the implicit critic equals the density ratio
+$p(\mathbf{v}\mid\mathbf{u})/p(\mathbf{v})$, so the loss can never fall below
+that value. This makes the "align the modalities" intuition precise: alignment is
+the maximization of an estimator of $I(\mathbf{u};\mathbf{v})$.
+
+The template for the symmetric version is CLIP [@radford2021learning], which
+aligns an image encoder and a text encoder by averaging the two retrieval
+directions. With unit-normalized embeddings
+$\hat{\mathbf{u}}_i=\mathbf{u}_i/\lVert\mathbf{u}_i\rVert$,
+$\hat{\mathbf{v}}_j=\mathbf{v}_j/\lVert\mathbf{v}_j\rVert$, and similarity matrix
+$S_{ij}=\langle\hat{\mathbf{u}}_i,\hat{\mathbf{v}}_j\rangle$, its loss is the mean
+of a modality-2-retrieval cross-entropy and its transpose,
+$$
+\mathcal{L}_{\mathrm{CLIP}}
+=\frac12\Bigg(
+-\frac1B\sum_{i=1}^{B}\log\frac{e^{S_{ii}/\tau}}{\sum_{j=1}^{B}e^{S_{ij}/\tau}}
+-\frac1B\sum_{i=1}^{B}\log\frac{e^{S_{ii}/\tau}}{\sum_{j=1}^{B}e^{S_{ji}/\tau}}
+\Bigg).
+$$ {#eq-ch09-clip}
+Minimizing @eq-ch09-clip over the two encoders drives the similarity matrix
+toward the identity on each paired batch; the two terms are the
+$\mathbf{u}\!\to\!\mathbf{v}$ and $\mathbf{v}\!\to\!\mathbf{u}$ retrieval
+objectives, so a match missed in *either* direction is penalized.
+
+Alignment is not free. By @eq-ch09-dpi the shared component recoverable from
+a cross-modal objective is capped by $I(\mathbf{x}^{(1)};\mathbf{x}^{(2)})$, and
+neither @eq-ch09-infonce nor @eq-ch09-clip contains a term that rewards
+retaining the private term $H(\mathbf{x}^{(1)}\mid\mathbf{x}^{(2)})$; an encoder
+can therefore satisfy the contrastive loss while discarding modality-specific
+variation entirely. This is why contrastive alignment is paired with a
+reconstruction or private-latent term when modality-specific signal matters
+[@gong2021cobolt].
+
+Applied to biology, this objective needs *paired* data — the same cell measured
+in two modalities. CITE-seq provides exactly that pairing for RNA and protein;
+chromatin and transcriptome pairs come from multiome assays. Contrastive
+alignment is attractive because it yields embeddings usable for cross-modal
+retrieval ("find the proteins matching this RNA profile") and because it does not
+assume a shared decoder. Its weaknesses are the need for large paired batches and
+the sensitivity of the learned space to how negatives are sampled. In biological
+data the "negatives" are not random: two cells of the same type are near-duplicates,
+and treating them as negatives teaches the model to separate cells that should be
+close. Effective implementations therefore use in-batch or hard-negative mining
+that respects cell-type structure, and they must be evaluated on held-out
+modality pairs rather than on the same batch used for training. For
+sequence–structure alignment, the same idea underlies models that embed a
+protein sequence and its structure in a comparable space, using structure
+predictors such as AlphaFold [@jumper2021highly] or inverse-folding models
+[@hsu2022learning].
+
+# Translation Between Modalities
+
+Alignment asks whether two modalities can be compared; **translation** asks
+whether one can be predicted from the other. Spatial transcriptomics is the
+canonical case in this chapter: given a tissue image and a dissociated scRNA-seq
+reference, predict the spatial location of each cell type. Tangram
+[@biancalani2021deep] learns a nonnegative soft-assignment matrix
+$T\in\mathbb{R}_{\ge0}^{\,n_{\mathrm{ref}}\times n_{\mathrm{sp}}}$ mapping
+$n_{\mathrm{ref}}$ reference cells onto $n_{\mathrm{sp}}$ spatial spots. Writing
+$\mathbf{Y}\in\mathbb{R}^{n_{\mathrm{sp}}\times g}$ for the observed spot
+expression and
+$\mathbf{X}_{\mathrm{ref}}\in\mathbb{R}^{n_{\mathrm{ref}}\times g}$ for the
+dissociated reference, it maximizes expression concordance subject to a mapping
+regularizer,
+$$
+\max_{T\ge0}\;
+\sum_{k=1}^{n_{\mathrm{sp}}}
+\cos\!\Big(\big(T^{\top}\mathbf{X}_{\mathrm{ref}}\big)_{k},\,\mathbf{Y}_{k}\Big)
+\;-\;\lambda\,\Omega(T),
+$$ {#eq-ch09-translation}
+where, in @eq-ch09-translation,
+$\big(T^{\top}\mathbf{X}_{\mathrm{ref}}\big)_{k}$ is the predicted expression of
+spot $k$, $\cos(\cdot,\cdot)$ is the cosine similarity of Appendix A, $\Omega(T)$
+penalizes degenerate mappings (for example, many reference cells collapsing onto
+one spot), and $\lambda\ge0$ trades concordance against the regularizer. The
+learned rows of $T$ are the cross-modal interface: each spot is represented as a
+mixture of the reference cells assigned to it. SpaGCN
+[@hu2021spagcn] instead embeds each spot
+in histology-space, combining gene expression with image features and spatial
+coordinates through a graph convolutional network to identify spatial domains.
+
+Other translation directions follow the same pattern: sequence → structure
+(AlphaFold [@jumper2021highly], and inverse folding for structure → sequence
+[@hsu2022learning]), and RNA → protein or protein → RNA in CITE-seq via the joint
+models above [@gayoso2021joint; @ashuach2023multivi]. In every case the embedding
+is the interface: the two modalities are bridged because their representations
+live in the same or comparable space.
+
+# Missing Modalities and Partial Observability
+
+Real multi-omic datasets are almost never complete. Some cells have only RNA,
+some only ATAC, some both; spatial assays lose cells that dissociate; and donors
+differ in which assays were run. Partial observability is a first-class modeling
+requirement, not an edge case. Three strategies are common:
+
+- **Marginal likelihood training.** Models such as MultiVI [@ashuach2023multivi]
+  and totalVI [@gayoso2021joint] are trained so that a cell with only one
+  modality present still contributes a valid likelihood term, yielding a latent
+  embedding for every cell regardless of which views were measured.
+- **Factor models with missing-view priors.** MOFA+ [@argelaguet2020mofa]
+  handles missing modalities within its Bayesian inference by integrating over
+  unobserved views.
+- **Alignment plus imputation.** Contrastive models can impute a missing
+  modality by nearest-neighbor retrieval in the aligned space, at the cost of
+  treating a prediction as an observation — a step that must be reported
+  explicitly because it can bias downstream analysis.
+
+The design principle is that missingness should be part of the generative
+process, so that a cell's embedding depends on *which* modalities were observed
+rather than pretending all views exist. This has an evaluation consequence:
+integration methods must be compared under the same pattern of missingness,
+because a method that looks strong on fully paired data can degrade sharply when
+only one modality is observed, and vice versa. Reporting the observed-modality
+pattern alongside the integration score is therefore as important as reporting
+the score itself.
+
+# Case Study: Spatial Transcriptomics Embeddings
+
+Spatial transcriptomics makes the integration problem concrete. Each spot carries
+(i) a gene-expression count vector, (ii) two spatial coordinates, and usually
+(iii) a histology image patch. The task is to place cell types and gene programs
+in space, which requires aligning a dissociated reference (high resolution, no
+space) with the spatial assay (space, lower resolution).
+
+Tangram [@biancalani2021deep] learns a mapping from reference cells to spatial
+voxels by optimizing expression similarity with a regularizer that discourages
+mapping many cells to one spot; the resulting alignment supports both cell-type
+placement and "spatial" gene expression. SpaGCN [@hu2021spagcn] builds a graph
+whose nodes are spots and whose edges encode spatial proximity, expression
+similarity, and image similarity, then applies graph convolution to smooth the
+embedding and detect spatial domains. Both treat the embedding as the shared
+medium across expression, image, and coordinates — the same shared-latent-space
+logic as the non-spatial models, with space as an additional modality.
+
+```python
+import muon as mu
+mdata = mu.read_h5mu("rna_atac.h5mu")
+mu.pp.intersect_obs(mdata)
+mu.tl.mofa(mdata, n_factors=15)      # shared factors across modalities
+mu.tl.neighbors(mdata, n_neighbors=15)
+```
+
+The practical lesson from the case study generalizes: choose the fusion point
+according to what the downstream task needs. If the goal is a joint embedding of
+cells measured in different assays, intermediate fusion with missing-modality
+training is the robust default; if the goal is cross-modal retrieval, contrastive
+alignment is the natural fit; if the goal is a compact interpretable summary of
+shared variation, factor analysis remains competitive.
+
+::: {.callout-tip}
+## Key Takeaways
+- Multimodal integration decomposes variation into shared and modality-specific
+  factors; a good embedding preserves both rather than discarding private signal
+  to force alignment.
+- Fusion happens early (concatenate), late (combine predictions), or
+  intermediate (shared latent space); intermediate fusion is what enables
+  cross-modal transfer and missing-view handling.
+- MOFA+ [@argelaguet2020mofa] gives interpretable, linear shared factors;
+  MultiVI [@ashuach2023multivi] and Cobolt [@gong2021cobolt] give nonlinear
+  shared latents and support partially observed cells; WNN
+  [@hao2021integrated] fuses per-modality graphs.
+- Contrastive objectives in the CLIP/InfoNCE family [@radford2021learning;
+  @vandenoord2018representation] align paired modalities without a shared
+  decoder, and power cross-modal retrieval and sequence–structure alignment.
+- Translation (spatial placement, modality imputation, structure prediction)
+  relies on the shared space as the interface; spatial transcriptomics
+  [@biancalani2021deep; @hu2021spagcn] is the clearest worked example.
+- Missing modalities must be handled inside the model, not imputed silently; a
+  cell's embedding should depend on which views were actually observed.
+:::
+
+## Further Reading
+
+- Argelaguet et al., *MOFA+: a statistical framework for comprehensive
+  integration of multi-modal single-cell data*, Genome Biology 2020
+  [@argelaguet2020mofa].
+- Ashuach et al., *MultiVI: deep generative model for the integration of
+  multimodal data*, Nature Methods 2023 [@ashuach2023multivi].
+- Gong et al., *Cobolt: integrative analysis of multimodal single-cell sequencing
+  data*, Genome Biology 2021 [@gong2021cobolt].
+- Radford et al., *Learning transferable visual models from natural language
+  supervision*, ICML 2021 [@radford2021learning].
+- Biancalani et al., *Deep learning and alignment of spatially resolved
+  single-cell transcriptomes with Tangram*, Nature Methods 2021
+  [@biancalani2021deep].
+- Hu et al., *SpaGCN*, Nature Methods 2021 [@hu2021spagcn].

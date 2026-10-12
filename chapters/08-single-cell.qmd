@@ -2,9 +2,433 @@
 title: "Single-Cell Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 8*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+A single cell is not one biological object but a snapshot of thousands of
+transcripts at a moment in time. Single-cell RNA sequencing (scRNA-seq) turns
+that snapshot into a vector of gene counts, and the embedding problem is to map
+those sparse, noisy, high-dimensional vectors into a low-dimensional space in
+which proximity means biological similarity. This chapter covers the data, the
+classical pipelines, the probabilistic latent-variable models that dominate the
+field, the recent cell "foundation models", and how integration is measured.
+
+::: {.callout-note}
+## Definition
+A **cell embedding** is a mapping $\mathbf{z} = f(\mathbf{x})$ from a cell's
+expression profile $\mathbf{x} \in \mathbb{R}^{g}$ over $g$ genes to a
+low-dimensional vector $\mathbf{z} \in \mathbb{R}^{d}$ ($d \ll g$), such that
+distances in $\mathbf{z}$-space approximate biological relationships — cell type,
+state, developmental trajectory — rather than technical covariates such as
+sequencing depth or batch. Vector and matrix notation follows Appendix A:
+$\mathbf{x},\mathbf{z}$ are column vectors, and a data matrix with $n$ cells is
+bold uppercase, $\mathbf{X}\in\mathbb{R}^{n\times g}$.
 :::
 
-TODO
+# The Data: Counts, Sparsity, and Technical Noise
+
+## Count matrices
+
+Droplet-based protocols such as the 10x Chromium system [@zheng2017massively]
+barcode transcripts per cell, yielding a count matrix
+$\mathbf{X} \in \mathbb{N}^{n \times g}$ with $n$ cells and $g$ genes, where the
+scalar entry $X_{ij}$ is the number of reads assigned to gene $j$ in cell $i$.
+The matrix is stored as a sparse representation because the
+overwhelming majority of entries are zero. Two properties of this matrix drive
+most modeling choices:
+
+- **Sparsity and "dropout".** A zero can mean the transcript is genuinely
+  absent, or that it was present but not captured. This ambiguity is the
+  single-cell analogue of missing data and motivates probabilistic models that
+  treat zeros as observations rather than truth.
+- **Library size.** Cells have different total counts
+  $s_i = \sum_{j=1}^{g} X_{ij}$, reflecting differences in capture efficiency, not
+  biology. Library size is the dominant technical covariate and must be modeled
+  or normalized — see @eq-ch08-normalize.
+
+Two further artifacts are endemic. **Doublets** are droplets that captured two
+cells; their profiles look like an interpolated cell type and can seed spurious
+clusters. **Cell-cycle phase** is a strong continuous covariate that separates
+cycling and quiescent cells irrespective of identity. Neither is a biological
+signal of interest for most tasks, and both must be regressed out or modeled.
+
+::: {.callout-note}
+## Definition
+A **batch effect** is systematic technical variation between groups of cells
+processed separately — different days, donors, chemistries, or sequencing runs —
+that is confounded with the biological signal of interest. Integration methods
+aim to remove batch variation while preserving biological variation.
+:::
+
+## Why the raw counts are a poor embedding
+
+Using raw counts directly as features is unhelpful: the geometry is dominated by
+sequencing depth, the axes are individual genes rather than interpretable
+factors, and distances between cells correlate with technical rather than
+biological state. Every downstream method in this chapter exists to replace raw
+counts with a representation in which this is no longer true.
+
+# Classical Pipelines: From Counts to a Neighborhood Graph
+
+The standard Scanpy/Seurat workflow [@wolf2018scanpy; @hao2021integrated]
+converts counts into a graph over cells through a fixed sequence of steps.
+
+## Normalization and feature selection
+
+Raw counts vary with sequencing depth before they vary with biology. Writing
+$\mathbf{X}\in\mathbb{N}^{n\times g}$ for the count matrix, the **library size**
+of cell $i$ is $s_i=\sum_{j=1}^{g}X_{ij}$, and the standard pipeline rescales each
+cell to a common target $s^{\ast}$ (Scanpy uses $s^{\ast}=10^{4}$) and then applies
+the shifted logarithm,
+$$
+\tilde{X}_{ij}=\log\!\left(1+\frac{X_{ij}}{s_i}\,s^{\ast}\right),
+\qquad \tilde{\mathbf{X}}\in\mathbb{R}^{n\times g},
+$$ {#eq-ch08-normalize}
+a construction shared by Scanpy and Seurat [@wolf2018scanpy; @stuart2019comprehensive].
+
+The logarithm is not cosmetic but a variance-stabilizing transform. If $X_{ij}$
+follows a negative binomial with mean $\mu_{ij}$ and gene-specific
+over-dispersion (concentration) $\theta_j>0$, then
+$\operatorname{Var}[X_{ij}]=\mu_{ij}+\mu_{ij}^{2}/\theta_j$. By the delta method a
+transform $f$ has variance
+$\operatorname{Var}[f(X_{ij})]\approx[f'(\mu_{ij})]^{2}\operatorname{Var}[X_{ij}]$;
+requiring this to be constant as $\mu_{ij}$ grows forces
+$f'(\mu)\propto(\mu+\mu^{2}/\theta)^{-1/2}\to 1/\mu$, whose solution is
+$f=\log$. Hence log-scaling tames the mean–variance relationship that would
+otherwise let a few high-expression genes dominate Euclidean distances; the shift
+$1+\cdot$ keeps the map finite at zero, where the count can legitimately be $0$.
+
+After normalization the genes are filtered to a subset
+$\mathcal{H}\subseteq\{1,\dots,g\}$ of **highly variable genes** (HVGs): the genes
+whose observed spread exceeds the spread expected from technical noise at their
+expression level. Following the Seurat convention [@stuart2019comprehensive], gene
+$j$ is summarized by its dispersion $\delta_j=\log(\sigma_j^{2}/\bar{\mu}_j)$ and by
+the within-bin standardized score
+$$
+Z_j=\frac{\delta_j-\bar{\delta}_{\operatorname{bin}(j)}}{\operatorname{sd}\!\big(\delta_{\operatorname{bin}(j)}\big)},
+\qquad
+\mathcal{H}=\big\{\,j \;:\; Z_j\ge\zeta \ \text{or } j \text{ among the } n_{\mathrm{HVG}} \text{ largest } Z_j\big\},
+$$ {#eq-ch08-hvg}
+where $\bar{\mu}_j=\frac1n\sum_i\tilde{X}_{ij}$ and
+$\sigma_j^{2}=\frac1n\sum_i(\tilde{X}_{ij}-\bar{\mu}_j)^{2}$ are the gene mean
+and variance, $\operatorname{bin}(j)$ is the expression bin containing gene $j$, and
+$\bar{\delta}_{b}$ and $\operatorname{sd}(\delta_b)$ are the mean and standard deviation of
+dispersion within bin $b$. Subtracting $\bar{\delta}_{\operatorname{bin}(j)}$ removes the mean–variance
+dependence, so @eq-ch08-hvg selects genes with excess biological variability
+rather than genes that are merely highly expressed; the threshold $\zeta$ and the
+count $n_{\mathrm{HVG}}$ are user choices.
+
+## Linear compression with PCA
+
+Let $\tilde{\mathbf{X}}\in\mathbb{R}^{n\times g}$ collect the normalized,
+HVG-restricted profiles and
+$\boldsymbol{\mu}=\frac1n\tilde{\mathbf{X}}^{\top}\mathbf{1}_n\in\mathbb{R}^{g}$ be
+the column means, where $\mathbf{1}_n$ is the all-ones vector of length $n$, so
+that $\mathbf{X}_c=\tilde{\mathbf{X}}-\mathbf{1}_n\boldsymbol{\mu}^{\top}$ is the
+**centered** matrix. Principal component analysis [@pearson1901lines] takes the
+eigen-decomposition of the sample covariance,
+$$
+\boldsymbol{\Sigma}
+=\frac1n\mathbf{X}_c^{\top}\mathbf{X}_c
+=\mathbf{V}\boldsymbol{\Lambda}\mathbf{V}^{\top},
+\qquad
+\boldsymbol{\Lambda}=\operatorname{diag}(\lambda_1\ge\cdots\ge\lambda_g\ge0),
+$$ {#eq-ch08-covariance}
+and projects the data onto the top $d$ eigenvectors,
+$\mathbf{Z}=\mathbf{X}_c\mathbf{V}_d\in\mathbb{R}^{n\times d}$ with
+$\mathbf{V}_d=[\mathbf{v}_1,\dots,\mathbf{v}_d]$. @eq-ch08-covariance is the
+same construction as the truncated SVD of Appendix A applied to centered data: the
+leading eigenvectors are the rank-$d$ linear approximation that minimizes
+$\lVert\mathbf{X}_c-\mathbf{Z}\mathbf{V}_d^{\top}\rVert_F^{2}$, by the Eckart–Young
+theorem. PCA is linear but effective: the leading components usually capture
+library size, cell cycle, and the major cell-type axes, and $d$ is chosen where
+the explained-variance ratio
+$\sum_{k=1}^{d}\lambda_k/\sum_{k=1}^{g}\lambda_k$ flattens.
+
+## Neighborhood graphs and visualization
+
+Cells are connected into a $k$-nearest-neighbor graph in PCA space; this graph
+is the workhorse structure for clustering (Leiden/Louvain) and for the
+nonlinear visualizations UMAP [@mcinnes2018umap] and t-SNE
+[@vandermaaten2008visualizing]. Both of these are for *visualization*: they
+optimize local neighborhoods, not global geometry, and coordinates carry no
+metric meaning.
+
+## Clustering and annotation
+
+Clustering operates on the neighbor graph rather than on the embedding
+coordinates, so the graph is the actual object of interest for many downstream
+analyses. Leiden communities are treated as candidate cell types, then annotated
+by differential expression against marker genes and, increasingly, by
+reference-based label transfer. The order matters: batch integration must happen
+*before* clustering, because a graph built on unintegrated data will split each
+cell type by batch.
+
+```python
+import scanpy as sc
+adata = sc.read_h5ad("pbmc.h5ad")
+sc.pp.normalize_total(adata, target_sum=1e4)
+sc.pp.log1p(adata)
+sc.pp.highly_variable_genes(adata, n_top_genes=2000)
+sc.pp.scale(adata)
+sc.tl.pca(adata, n_comps=50)
+sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30)
+sc.tl.umap(adata)
+sc.tl.leiden(adata)
+```
+
+This classical pipeline is fast, interpretable, and still the default baseline.
+Its weakness is batch integration: PCA on concatenated batches separates batches,
+and no step above is probabilistic about *why* a cell looks the way it does.
+
+# Probabilistic Latent-Variable Models
+
+The breakthrough that made batch-aware embeddings routine was to model each
+cell's counts with a generative process and infer a latent vector.
+
+## scVI
+
+scVI [@lopez2018deep] models each count as a **zero-inflated negative binomial**
+(ZINB) draw. For cell $i$ let $\mathbf{z}_i\in\mathbb{R}^{d}$ be its latent vector,
+$s_i=\sum_{j}X_{ij}$ its library size, and $\mathbf{b}_i$ a one-hot batch
+covariate. Given $(\mathbf{z}_i,\mathbf{b}_i)$ the decoder with parameters
+$\theta$ produces, per gene $j$, a normalized mean $\rho_{ij}$, a rate
+$\mu_{ij}=s_i\rho_{ij}$, and a zero-inflation probability $\pi_{ij}\in[0,1]$, with
+a gene-specific over-dispersion $\theta_j>0$:
+$$
+\mu_{ij}=s_i\,\rho_{ij},\qquad
+p_{\mathrm{ZINB}}(x_{ij}\mid\pi_{ij},\mu_{ij},\theta_j)
+=\pi_{ij}\,\delta_0(x_{ij})+(1-\pi_{ij})\,
+\underbrace{\frac{\Gamma(x_{ij}+\theta_j)}{\Gamma(\theta_j)\,x_{ij}!}
+\left(\frac{\theta_j}{\theta_j+\mu_{ij}}\right)^{\theta_j}
+\left(\frac{\mu_{ij}}{\theta_j+\mu_{ij}}\right)^{x_{ij}}}_{p_{\mathrm{NB}}(x_{ij}\mid\mu_{ij},\theta_j)},
+$$ {#eq-ch08-zinb}
+
+where $\Gamma$ is the gamma function and $\delta_0$ is the point mass at zero; the
+mixture in @eq-ch08-zinb is the model's account of technical dropout,
+distinguishing "not captured" from "not expressed". The library size enters
+through $\mu_{ij}=s_i\rho_{ij}$ and,
+together with $\mathbf{b}_i$, is an explicit input to the decoder, which is what
+makes the latent space depth- and batch-aware rather than depth- and
+batch-dominated.
+
+scVI assumes the genes are **conditionally independent given the latent**, so the
+observation log-likelihood factors over genes:
+$$
+\log p_\theta(\mathbf{x}_i\mid\mathbf{z}_i,s_i,\mathbf{b}_i)
+=\sum_{j=1}^{g}\log p_{\mathrm{ZINB}}\!\big(x_{ij}\mid\pi_{ij},\mu_{ij},\theta_j\big).
+$$ {#eq-ch08-scvi-likelihood}
+
+The posterior $p_\theta(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)$ is
+intractable, so scVI trains a variational autoencoder [@kingma2014auto] whose
+encoder $q_\phi(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)$ maximizes the
+**evidence lower bound** (ELBO) of the marginal likelihood
+$p_\theta(\mathbf{x}_i\mid s_i,\mathbf{b}_i)=\int p_\theta(\mathbf{x}_i\mid\mathbf{z}_i,s_i,\mathbf{b}_i)\,p(\mathbf{z}_i)\,d\mathbf{z}_i$:
+$$
+\mathcal{L}(\theta,\phi;\mathbf{x}_i)
+=\mathbb{E}_{q_\phi(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)}
+\!\big[\log p_\theta(\mathbf{x}_i\mid\mathbf{z}_i,s_i,\mathbf{b}_i)\big]
+-D_{\mathrm{KL}}\!\big(q_\phi(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)\,\lVert\,p(\mathbf{z}_i)\big).
+$$ {#eq-ch08-elbo}
+
+Both terms in @eq-ch08-elbo are computable: the first is the expected ZINB
+likelihood of @eq-ch08-scvi-likelihood evaluated at a reparameterized sample
+from $q_\phi$, and the second is a closed-form KL to the standard-normal prior
+$p(\mathbf{z}_i)=\mathcal{N}(\mathbf{0},\mathbf{I})$. The bound follows from
+Jensen's inequality applied to the log of an expectation,
+$$
+\log p_\theta(\mathbf{x}_i\mid s_i,\mathbf{b}_i)
+=\log\!\int q_\phi(\mathbf{z}_i\mid\cdot)\,
+\frac{p_\theta(\mathbf{x}_i\mid\mathbf{z}_i,s_i,\mathbf{b}_i)\,p(\mathbf{z}_i)}
+{q_\phi(\mathbf{z}_i\mid\cdot)}\,d\mathbf{z}_i
+\;\ge\;\mathcal{L}(\theta,\phi;\mathbf{x}_i),
+$$
+with the gap equal to the posterior approximation error,
+$$
+\log p_\theta(\mathbf{x}_i\mid s_i,\mathbf{b}_i)-\mathcal{L}(\theta,\phi;\mathbf{x}_i)
+=D_{\mathrm{KL}}\!\big(q_\phi(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)\,\lVert\,p_\theta(\mathbf{z}_i\mid\mathbf{x}_i,s_i,\mathbf{b}_i)\big)\;\ge\;0 .
+$$ {#eq-ch08-elbo-gap}
+@eq-ch08-elbo-gap identifies the ELBO as
+$\log p_\theta(\mathbf{x}_i\mid\cdot)$ minus a nonnegative KL gap, so maximizing
+$\mathcal{L}$ both raises the marginal likelihood and tightens the variational
+approximation. The mean of $q_\phi(\mathbf{z}_i\mid\cdot)$ is taken as the cell
+embedding.
+
+Because the batch term is explicit in the decoder, the latent space is *designed*
+to retain biology while the decoder absorbs batch-specific scale. scVI is
+implemented in the `scvi-tools` library [@gayoso2022python]. The latent space is
+reusable: the same $\mathbf{z}_i$ supports clustering, visualization, and
+differential-expression testing under a count-appropriate noise model, and
+benchmarks place scVI among the strongest integration methods
+[@luecken2022benchmarking].
+
+## scANVI and annotation transfer
+
+scANVI [@xu2021probabilistic] extends scVI to semi-supervised settings: a subset
+of cells carries cell-type labels, and a classifier head on the latent space
+propagates those labels to unlabeled cells during training. The result is a
+latent space that is both batch-corrected and class-discriminative, used for
+reference-based annotation.
+
+## totalVI and multimodal cells
+
+totalVI [@gayoso2021joint] generalizes the same framework to CITE-seq data, where
+each cell has both an RNA count vector and a surface-protein count vector. It
+infers a *joint* latent space and two modality-specific likelihoods, so that RNA
+and protein both inform a single embedding and one modality can help denoise the
+other. Multimodal integration is the subject of Chapter 9.
+
+## The standard latent-variable pipeline
+
+```{mermaid}
+flowchart LR
+  A["Raw counts X and batch b"] --> B["Latent encoder q(z|x,b)"]
+  B --> C["Latent embedding z"]
+  C --> D["Decoder: ZINB likelihood p(x|z,b)"]
+  D --> A
+  C --> E["Downstream: clustering, annotation, DE"]
+  C --> F["UMAP, visualization only"]
+```
+
+The figure makes explicit the structure shared by scVI, scANVI, and totalVI: a
+count likelihood, a latent embedding, an explicit batch covariate in the
+generative model, and a single low-dimensional space reused for many downstream
+tasks. The key design decision — encoding batch in the *decoder* rather than
+removing it from the input — is what lets the same latent space serve both
+integration and biological discovery.
+
+# Cell Foundation Models
+
+A second wave models cells by analogy with language models: genes are tokens,
+expression levels are values, and a transformer is pretrained on millions of
+cells before being applied to new tasks.
+
+## scBERT
+
+scBERT [@yang2022scbert] tokenizes each cell as a ranked gene-expression
+sequence and pretrains a BERT-style transformer with a masked-expression
+objective, then fine-tunes for cell-type annotation. It demonstrated that
+gene-level self-supervision transfers across datasets.
+
+## Geneformer
+
+Geneformer [@theodoris2023transfer] pretrains on a large corpus of single-cell
+transcriptomes using **rank-value encoding** — each cell is a sequence of genes
+ordered by expression rank — and shows transfer to dosage-sensitivity and
+network-biology prediction tasks. Its design emphasizes transfer learning for
+network biology rather than embedding quality as such.
+
+## scGPT and scFoundation
+
+scGPT [@cui2024scgpt] is a generative transformer pretrained across tens of
+millions of cells, with a unified token scheme for genes and expression bins and
+a fine-tuning recipe spanning annotation, perturbation prediction, and
+multi-omic integration. scFoundation [@hao2024large] develops a large-scale
+transcriptomic model with a read-depth-aware pretraining objective and a
+"cell sentence" factorization, targeting downstream tasks directly from the
+pretrained representation. Both are generative foundation models in the sense of
+Chapter 13; both inherit the masked-token pretraining idea from language models.
+
+## What foundation models add — and their caveats
+
+These models promise a single pretrained representation reusable across tissues
+and assays, reducing the need for task-specific training. A coarse comparison of
+the four, by input encoding and pretraining objective:
+
+| Model | Input encoding | Pretraining objective | Primary source |
+|---|---|---|---|
+| scBERT | Ranked gene sequence + expression bins | Masked gene-expression prediction | [@yang2022scbert] |
+| Geneformer | Genes ranked by expression (rank-value) | Masked gene prediction | [@theodoris2023transfer] |
+| scGPT | Gene tokens + expression-value bins | Masked modeling, generative | [@cui2024scgpt] |
+| scFoundation | Gene tokens with read-depth modeling | Masked expression, depth-aware | [@hao2024large] |
+
+The open questions are evaluation (see below), whether they beat well-tuned scVI on standard
+integration benchmarks [@luecken2022benchmarking], and whether rank-based or
+bin-based tokenization loses information that a count model preserves. The
+honest summary is that cell foundation models are promising and widely used, but
+the evidence that they dominate simpler probabilistic embeddings is uneven.
+
+# Gene Embeddings and Transfer Across Datasets
+
+Cells are not the only entities to embed. A **gene embedding** is a learned
+$d$-dimensional vector per gene, obtained either as a row of a factorized
+expression matrix or as an output of a gene-token encoder. Gene embeddings let
+one reason about gene–gene similarity, co-expression modules, and, via
+attention over gene tokens in scGPT [@cui2024scgpt] and scBERT
+[@yang2022scbert], which genes drive a prediction.
+
+Cross-dataset transfer is the practical payoff. Reference-based annotation
+(scANVI [@xu2021probabilistic]), query-to-reference mapping, and label
+propagation all rest on the assumption that the latent geometry is stable across
+experiments. That assumption is exactly what integration metrics test. When it
+holds, a model trained on a well-annotated atlas can label a new experiment with
+no new labels, which is the single most consequential use of cell embeddings in
+practice. When it fails — a new tissue, a new species, a perturbation not seen in
+the reference — the failure is usually silent, because the model still returns
+confident labels. Transfer should therefore be validated on held-out cell types,
+not only on held-out cells.
+
+# Evaluation: Integration Metrics and the UMAP Caveat
+
+Integration is not a single scalar. The benchmarking study of Luecken et al.
+[@luecken2022benchmarking] established that methods trade off **batch removal**
+against **biological conservation**, and no method wins on both axes
+simultaneously. Evaluation therefore uses complementary metrics.
+
+| Metric | What it measures | Needs labels? | Primary source |
+|---|---|---|---|
+| kBET | Rejection rate of the null that batch composition in a cell's neighborhood matches global composition (batch mixing, local) | No | [@buttner2019test] |
+| iLISI | Effective number of batches represented in a cell's neighborhood (batch mixing, local) | No | [@korsunsky2019fast] |
+| cLISI | Effective number of cell types in a neighborhood (cell-type separation) | Yes | [@korsunsky2019fast] |
+| ARI / NMI | Agreement of cluster labels with ground-truth cell types | Yes | [@luecken2022benchmarking] |
+| Graph connectivity | Fraction of each cell type connected within the integrated graph | Yes | [@luecken2022benchmarking] |
+| Silhouette (batch vs. label) | Separation along batch vs. biological axes | Partly | [@luecken2022benchmarking] |
+
+kBET [@buttner2019test] and LISI/iLISI/cLISI [@korsunsky2019fast] were introduced
+with the Harmony integration method and are now the de facto neighborhood-level
+metrics; ARI, NMI, graph connectivity, and silhouette are label-based and enter
+through the benchmarking framework.
+
+::: {.callout-warning}
+## UMAP is not a benchmark
+UMAP [@mcinnes2018umap] and t-SNE [@vandermaaten2008visualizing] are
+visualization tools that optimize local neighborhoods under a stochastic layout.
+Their coordinates are not metric, they can create apparent clusters from
+continuous data, and a "well-mixed" UMAP can hide residual batch structure that
+neighbor-based metrics detect. Report integration quality with neighborhood and
+label metrics, and use UMAP only to *illustrate* a result already supported
+numerically. This mirrors the broader visualization caveats in Chapter 12.
+:::
+
+The practical recipe is: fit a latent model, compute kBET/iLISI/cLISI plus at
+least one label-based metric, and compare against a no-integration baseline.
+A method that improves mixing while collapsing biologically distinct cell types
+has traded the wrong thing.
+
+::: {.callout-tip}
+## Key Takeaways
+- A cell embedding replaces a sparse, depth-dominated count vector with a
+  low-dimensional representation whose geometry encodes biological similarity.
+- Classical pipelines (normalize → HVG → PCA → kNN graph → UMAP) are fast
+  baselines but are not batch-aware; probabilistic models fix this by putting the
+  batch covariate inside a generative likelihood [@lopez2018deep].
+- scVI, scANVI, and totalVI share one recipe — a count likelihood, a latent
+  embedding, and an explicit batch term — differing in supervision and modality
+  [@lopez2018deep; @xu2021probabilistic; @gayoso2021joint].
+- Cell foundation models (scBERT, Geneformer, scGPT, scFoundation) pretrain on
+  gene-token sequences and transfer across tasks, but their advantage over tuned
+  probabilistic models is task-dependent and must be benchmarked
+  [@yang2022scbert; @theodoris2023transfer; @cui2024scgpt; @hao2024large].
+- Evaluate integration with neighborhood metrics (kBET, LISI) and label-based
+  metrics (ARI, NMI, graph connectivity); never treat a UMAP as quantitative
+  evidence [@buttner2019test; @korsunsky2019fast; @luecken2022benchmarking].
+:::
+
+## Further Reading
+
+- Lopez et al., *Deep generative modeling for single-cell transcriptomics* —
+  the scVI primary source [@lopez2018deep].
+- Luecken et al., *Benchmarking atlas-level data integration in single-cell
+  genomics*, Nature Methods 2022 [@luecken2022benchmarking].
+- Wolf et al., *SCANPY: large-scale single-cell gene expression data analysis*,
+  Genome Biology 2018 [@wolf2018scanpy].
+- Theodoris et al., *Transfer learning enables predictions in network biology*,
+  Nature 2023 [@theodoris2023transfer].
+- The `scvi-tools` software library [@gayoso2022python].

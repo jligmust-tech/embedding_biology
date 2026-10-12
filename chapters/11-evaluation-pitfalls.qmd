@@ -2,9 +2,240 @@
 title: "Evaluation, Benchmarks, and Pitfalls"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 11*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+An embedding is only as good as the evidence that supports claims about it. Because biological data are structured — sequences share homology, molecules share scaffolds, cells share donors and batches — the evaluation protocol influences the reported result at least as much as the model does. A protocol that ignores these dependencies reliably produces high numbers that do not transfer when someone else reruns the experiment on new data. This chapter covers how embeddings are evaluated, what the standard benchmarks measure, the leakage and shift phenomena that invalidate naive comparisons, the metrics and their caveats, and the reporting practices that make results interpretable. The goal is practical: after reading, you should be able to design an evaluation for a new embedding that a sceptical reviewer cannot dismantle.
+
+# Evaluating an embedding
+
+::: {.callout-note}
+## Definition
+**Embedding evaluation** measures how useful a vector representation is for downstream tasks while separating representation quality from the capacity of the task model. An evaluation protocol fixes three things *in advance*: the **probe** (how embeddings are mapped to predictions), the **splits** (which examples are held out, and why), and the **metric** (what number summarises success). Changing any of the three after seeing results turns an evaluation into a search over protocols rather than a measurement of the representation.
 :::
 
-TODO
+## Linear probing and supervised heads
+
+Linear probing attaches a low-capacity classifier — typically logistic regression — to frozen embeddings and reports held-out accuracy or AUROC [@alain2016understanding]. Write the embedding of entity $i$ as $\mathbf{x}_i \in \mathbb{R}^d$, its binary label as $y_i \in \{0,1\}$, and the probe parameters as $\mathbf{w} \in \mathbb{R}^d$ and $b \in \mathbb{R}$. The probe predicts the positive-class probability $\sigma(\mathbf{w}^\top \mathbf{x}_i + b)$, where $\sigma(z) = (1 + e^{-z})^{-1}$ is the logistic function, and is fit by minimising the $\ell_2$-regularised cross-entropy over $n$ examples,
+
+$$
+\min_{\mathbf{w},\, b} \;
+-\frac{1}{n}\sum_{i=1}^{n}\Big[\, y_i \log \sigma(\mathbf{w}^\top \mathbf{x}_i + b)
++ (1 - y_i)\log\big(1 - \sigma(\mathbf{w}^\top \mathbf{x}_i + b)\big) \,\Big]
++ \lambda \lVert \mathbf{w} \rVert_2^2 ,
+$$ {#eq-ch11-linear-probe}
+
+with regularisation strength $\lambda \ge 0$; the encoder $f$ that produced $\mathbf{x}_i$ is frozen, so only $(\mathbf{w}, b)$ are learned and the reported number is measured on held-out examples (@eq-ch11-linear-probe). Because the probe class is linear and low-dimensional, a high probe score is evidence that the target is *at least* linearly decodable from the representation, but a low score does not certify that the information is absent, since a richer probe or a different layer might extract it. A linear probe therefore lower-bounds what any probe can recover; it does not upper-bound it [@alain2016understanding]. Supervised heads generalise the probe to nonlinear models or task-specific parameter blocks; they measure the same quantity with more capacity, trading interpretability of the result for a higher ceiling.
+
+**From probe accuracy to an information bound.** A trained probe converts decodability into a formal *lower bound* on the mutual information $I(Y;\mathbf{x})$ between the label $Y$ and the representation $\mathbf{x}$ (Appendix A). Let a $K$-class probe attain error probability $P_e = \Pr(\hat Y \neq Y)$. Fano's inequality gives $H(Y \mid \hat Y) \le H_b(P_e) + P_e \log(K-1)$, where $H_b(p) = -p\log p - (1-p)\log(1-p)$ is the binary entropy and the logarithm is natural (nats). Since the prediction $\hat Y$ is a function of $\mathbf{x}$, the data-processing inequality gives $I(Y;\mathbf{x}) \ge I(Y;\hat Y) = H(Y) - H(Y \mid \hat Y)$, hence
+
+$$
+I(Y;\mathbf{x}) \;\ge\; H(Y) - H_b(P_e) - P_e \log(K-1) \;=\;: \; \underline{I}(P_e).
+$$ {#eq-ch11-probing-bound}
+
+The bound is one-sided (@eq-ch11-probing-bound): a low error certifies that the representation contains at least $\underline{I}(P_e)$ nats about the label, whereas a high error proves nothing, because the information may be present in a form the chosen probe cannot read [@fano1961transmission]. For a binary task ($K = 2$) the final term vanishes and $\underline{I}(P_e) = H(Y) - H_b(P_e)$.
+
+## Fine-tuning
+
+Fine-tuning updates the encoder end-to-end with the task objective [@devlin2019bert]. It measures the *transfer potential* of a pretrained representation rather than its frozen content, and therefore answers a different question from probing. Fine-tuning results depend strongly on learning rate, schedule, and number of epochs, so honest comparisons hold these factors constant and report them. The TAPE benchmarks make the distinction explicit by reporting both probe and fine-tune results for the same protein tasks [@rao2019evaluating].
+
+## Non-parametric and unsupervised probes
+
+*k*-nearest-neighbour ($k$-NN) classification over the embedding requires no training and is a useful sanity check; it is sensitive to feature scaling and to the choice of distance, so both must be reported [@cover1967nearest]. Given a query embedding $\mathbf{x} \in \mathbb{R}^d$, a labelled reference set $\{(\mathbf{x}_j, y_j)\}_{j=1}^{m}$, and a distance $D(\cdot,\cdot)$, let $N_k(\mathbf{x})$ index the $k$ reference points nearest to $\mathbf{x}$. The prediction is the majority label
+
+$$
+\hat y(\mathbf{x}) \;=\; \operatorname*{mode}\big\{\, y_j : j \in N_k(\mathbf{x}) \,\big\},
+\qquad
+N_k(\mathbf{x}) \;=\; \operatorname*{arg\,min}_{S \subseteq \{1,\dots,m\},\, \lvert S \rvert = k} \; \sum_{j \in S} D(\mathbf{x}, \mathbf{x}_j),
+$$ {#eq-ch11-knn}
+
+with ties broken by a stated rule (@eq-ch11-knn); the choice of $D$ — Euclidean, cosine, or the model's own similarity — changes the result and is part of the protocol.
+
+Clustering probes ask whether the representation organises unlabeled data into meaningful groups. Graph-based community detection such as the Louvain method partitions a neighbour graph into communities [@blondel2008fast], and the silhouette coefficient scores how well-separated the resulting clusters are [@rousseeuw1987silhouettes]. For a partition that assigns each point $i$ to a cluster $c(i)$, let $a(i)$ be the mean distance from $\mathbf{x}_i$ to the other points of its own cluster and $b(i)$ the smallest mean distance from $\mathbf{x}_i$ to the points of any other cluster. Then per point, and on average,
+
+$$
+s(i) = \frac{b(i) - a(i)}{\max\{a(i),\, b(i)\}}, \qquad
+S = \frac{1}{n}\sum_{i=1}^{n} s(i) \in [-1, 1],
+$$ {#eq-ch11-silhouette}
+
+with values near $+1$ indicating tight, well-separated clusters, values near $0$ overlapping clusters, and negative values likely misassignment (@eq-ch11-silhouette). When ground-truth classes exist, cluster assignments are compared to them with adjusted Rand index or normalised mutual information.
+
+A minimal leak-aware probe is short to write. The only unusual ingredient is `groups`, which prevents related examples from being split across folds:
+
+```python
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score, GroupKFold
+
+X, y, groups = load_embeddings_labels_and_groups()  # groups = homology cluster
+probe = LogisticRegression(max_iter=1000)
+cv = GroupKFold(n_splits=5)
+scores = cross_val_score(probe, X, y, cv=cv, groups=groups)
+print(f"mean score: {scores.mean():.3f} +/- {scores.std():.3f}")
+```
+
+Changing `GroupKFold` to a random split is the single most common cause of inflated results, because examples that share a cluster of related sequences then appear in both training and validation folds.
+
+# Benchmarks
+
+Benchmarks standardise the probe, the splits, and the metric so that results are comparable across papers. For proteins, TAPE bundles five tasks — secondary structure, contact prediction, remote homology, fluorescence, and stability — with fixed splits and both probe and fine-tune baselines [@rao2019evaluating]. For DNA, the Nucleotide Transformer work introduced BEND, a benchmark of human-genomics tasks that evaluates models on biologically meaningful splits rather than random ones [@dallatorre2025nucleotide]. For single-cell data, benchmarking studies define integration tasks and metrics and show how heavily conclusions depend on preprocessing and on the choice of batch-correction method [@lopez2018deep; @luecken2022benchmarking]. Earlier supervised baselines such as DeepSEA and Basset remain useful internal comparisons when a new representation is proposed for regulatory tasks [@alipanahi2015predicting; @kelley2016basset], and proteome-scale language models provide the current default points of comparison for protein embeddings [@elnaggar2022prottrans; @rives2021biological].
+
+| Benchmark | Domain | What it measures | Split strategy |
+|---|---|---|---|
+| TAPE | Protein | Five supervised tasks: structure, contact, remote homology, fluorescence, stability | Fixed, task-specific train/valid/test folds [@rao2019evaluating] |
+| BEND | DNA | Human-genomics tasks from regulatory and variant data | Biologically meaningful, non-random splits [@dallatorre2025nucleotide] |
+| Integration benchmarks | Single-cell | Batch integration and label transfer | Multi-dataset, with metrics such as kBET and LISI [@luecken2022benchmarking] |
+| Supervised regulatory baselines | DNA | Regulatory activity from sequence | Chromosome- and locus-aware splits [@alipanahi2015predicting; @kelley2016basset] |
+
+: Representative benchmarks for biological embeddings, and the split strategies they use.
+
+A benchmark is only as trustworthy as its splits. The next two sections explain why.
+
+# Data leakage
+
+::: {.callout-note}
+## Definition
+**Data leakage** occurs when information that would not be available at prediction time enters training, so that validation performance overstates the model's ability to generalise. In biology, leakage is usually *structural*: the same biological entity, or a close relative of it, appears in both the training and the test set, so the test set measures memorisation of families rather than transfer to genuinely new ones.
+:::
+
+The most common source is **homology leakage**. When related sequences are split at random, a held-out protein or gene frequently has a close paralogue or orthologue in training [@whalen2022navigating]. Protein and nucleotide benchmarks mitigate this by clustering sequences at an identity threshold and assigning whole clusters to a single fold; clustering tools such as CD-HIT [@fu2012cdhit] and dedicated homology-partitioning tools [@teufel2023graphpart] make this practical, and reviews of biological machine learning prescribe it as the default [@bernett2024guiding].
+
+The mitigation can be stated exactly. Fix a similarity $\mathrm{sim}(\cdot,\cdot)$ on entities (for example, pairwise sequence identity) and a threshold $\rho$; call two examples *related* when $\mathrm{sim}(u,v) \ge \rho$, and let $c : \{1,\dots,n\} \to \mathcal{C}$ assign each example to a cluster so that related examples share a cluster $c(i) \in \mathcal{C}$ (the connected components under $\mathrm{sim} \ge \rho$). A partition into training and test folds is *homology-free at threshold $\rho$* when no cluster straddles two folds:
+
+$$
+c(i) \neq c(j) \quad \text{for all } i \in \mathcal{T}_{a},\; j \in \mathcal{T}_{b} \text{ with } a \neq b,
+\qquad
+\mathcal{T}_{\mathrm{tr}} \sqcup \mathcal{T}_{\mathrm{te}} = \{1,\dots,n\},
+$$ {#eq-ch11-homology-split}
+
+so each cluster is assigned in its entirety to a single fold (@eq-ch11-homology-split). A random split is the special case in which $c$ is the identity — each example its own cluster — and is honest only when the examples are genuinely unrelated. The reported number is then the held-out risk estimate $\hat R(\mathcal{T}_{\mathrm{te}}) = \lvert \mathcal{T}_{\mathrm{te}} \rvert^{-1}\sum_{i \in \mathcal{T}_{\mathrm{te}}} \ell\big(f(\mathbf{x}_i), y_i\big)$, where $\ell$ is the per-example loss (Appendix A). For a homology-free split this estimates generalisation to a *harder* distribution than the training one, which is precisely why it is the estimate worth reporting.
+
+**Duplicate records** are a degenerate case of the same problem: identical or near-identical entries across databases inflate similarity. Deduplication followed by cluster-based splitting handles both. For small molecules the analogue is the **scaffold split**: because activity is largely determined by the molecular framework [@bemis1996properties], splitting by scaffold rather than by molecule prevents a test compound from sharing its core with a training compound [@chuang2018adversarial]. **Temporal splits** are required whenever the data have a time axis — a model that predicts clinical or assay outcomes must be trained on the past and tested on the future, not on a random mix of both.
+
+A useful defensive habit is the **adversarial control**: train a model that can only exploit leakage, or shuffle features in a way that should destroy signal, and confirm that the reported metric collapses to chance [@chuang2018adversarial]. If it does not collapse, the protocol leaks somewhere the designer has not looked.
+
+# Distribution shift
+
+Even a leak-free split can mislead when the test distribution differs from the training distribution. Three shifts recur in biology. **New families:** a model trained on characterised protein or gene families is tested on a family it has never seen, and performance drops sharply [@whalen2022navigating]. **Batch effects:** technical variation between experiments changes the distribution of embeddings and can dominate biological signal, which is why integration methods and their evaluation are studied as a separate problem [@luecken2022benchmarking; @lopez2018deep]. **Organism transfer:** a model pretrained on one species is applied to another, testing whether the representation captures conserved biology rather than species-specific sequence statistics [@whalen2022navigating].
+
+The practical implication is that a serious evaluation includes at least one deliberately shifted test set and reports performance as a function of the shift. Reporting only in-distribution numbers invites the reader to assume they hold everywhere.
+
+# Metrics and their caveats
+
+For binary classification, score each example with a real-valued prediction $\hat p_i \in [0,1]$ (a probability or a monotone score) and threshold it at $t$ to form the hard prediction $\hat y_i(t) = \mathbb{1}[\hat p_i \ge t]$. With $P$ positive and $N$ negative ground-truth examples, the counts at threshold $t$ are $\mathrm{TP}(t) = \sum_{i:\, y_i = 1}\hat y_i(t)$, $\mathrm{FP}(t) = \sum_{i:\, y_i = 0}\hat y_i(t)$, $\mathrm{FN}(t) = P - \mathrm{TP}(t)$, and $\mathrm{TN}(t) = N - \mathrm{FP}(t)$. Precision, recall, and the false-positive rate are
+
+$$
+\mathrm{Prec}(t) = \frac{\mathrm{TP}(t)}{\mathrm{TP}(t) + \mathrm{FP}(t)}, \qquad
+\mathrm{Rec}(t) = \frac{\mathrm{TP}(t)}{\mathrm{TP}(t) + \mathrm{FN}(t)} = \mathrm{TPR}(t), \qquad
+\mathrm{FPR}(t) = \frac{\mathrm{FP}(t)}{\mathrm{FP}(t) + \mathrm{TN}(t)},
+$$ {#eq-ch11-precision-recall}
+
+with the convention $\mathrm{Prec}(t) = 1$ when no example is predicted positive (@eq-ch11-precision-recall). The ROC curve plots $\mathrm{TPR}(t)$ against $\mathrm{FPR}(t)$ and the precision-recall (PR) curve plots $\mathrm{Prec}(t)$ against $\mathrm{Rec}(t)$ as $t$ varies. The area under the PR curve is
+
+$$
+\mathrm{AUPRC} \;=\; \int_{0}^{1} \mathrm{Prec}(r)\, dr
+\;=\; \sum_{k=1}^{P} \big(\mathrm{Rec}_k - \mathrm{Rec}_{k-1}\big)\, \mathrm{Prec}_k ,
+$$ {#eq-ch11-auprc}
+
+summed over the thresholds at which recall changes (@eq-ch11-auprc); for a ranking score this equals average precision. The area under the ROC curve, $\mathrm{AUROC}$, is defined analogously and, when all prediction scores are distinct, equals $\Pr(\hat p^{+} > \hat p^{-})$ — the probability that a random positive is ranked above a random negative [@saito2015precision].
+
+**Why AUPRC is preferred under class imbalance.** Let the prevalence (positive rate) be $\pi = P/(P+N)$. A classifier that ranks at random has $\Pr(\hat p^{+} > \hat p^{-}) = 1/2$, so $\mathrm{AUROC} = 1/2$ for every $\pi$. Under the same random ranking every retrieved item is an independent draw from the pool, so the fraction of positives among retrieved items is $\pi$ at all recall levels, and $\mathrm{AUPRC} \approx \pi$. The two metrics thus have different chance baselines: AUROC's is the constant $1/2$, whereas AUPRC's equals the prevalence and falls with it. When positives are rare ($\pi \ll 1$), the FPR denominator $\mathrm{FP}(t) + \mathrm{TN}(t) \approx N$ is enormous near any sensible threshold, so a large absolute number of false positives barely moves $\mathrm{FPR}$ and can leave AUROC high, while the same false positives inflate the precision denominator $\mathrm{TP}(t) + \mathrm{FP}(t)$, which is small near the top of the ranking, and depress AUPRC sharply. AUPRC is therefore the more discriminating summary when the positive class is rare [@saito2015precision]. Because AUPRC's chance baseline depends on $\pi$, AUPRC values are comparable only at fixed prevalence, and $\pi$ must be reported alongside the score.
+
+**Calibration** is a separate question from ranking. A predictor is *calibrated* if, among the examples it scores with confidence $c$, a fraction $c$ are positive: $\Pr(Y = 1 \mid \hat p = c) = c$ for every $c \in [0,1]$ [@guo2017calibration]. The expected calibration error (ECE) estimates the violation of this property with a fixed binning of the unit interval into $M$ bins $B_1,\dots,B_M$. With $\mathrm{acc}(B_m)$ the empirical accuracy of the hard predictions in bin $B_m$ and $\mathrm{conf}(B_m)$ their mean predicted probability,
+
+$$
+\mathrm{ECE} \;=\; \sum_{m=1}^{M} \frac{\lvert B_m \rvert}{n}\,\big\lvert\, \mathrm{acc}(B_m) - \mathrm{conf}(B_m) \,\big\rvert,
+\qquad
+\mathrm{acc}(B_m) = \frac{1}{\lvert B_m \rvert}\!\sum_{i \in B_m}\! \mathbb{1}[\hat y_i = y_i],\quad
+\mathrm{conf}(B_m) = \frac{1}{\lvert B_m \rvert}\!\sum_{i \in B_m}\! \hat p_i ,
+$$ {#eq-ch11-ece}
+
+with $\hat y_i = \mathbb{1}[\hat p_i \ge 1/2]$ for a binary task (@eq-ch11-ece) [@guo2017calibration].
+
+**Why ECE is a biased estimator of calibration.** The quantity ECE targets is the true calibration error $\mathbb{E}\big[\lvert \hat p - \Pr(Y = 1 \mid \hat p) \rvert\big]$, and ECE is a *plug-in* estimate that replaces the conditional probability $\Pr(Y = 1 \mid \hat p)$ by a per-bin average of the *hard* labels $y_i$. Two problems follow. First, a bin can mix overconfident and underconfident regions: if half of $B_m$ is overconfident by $\delta$ and half is underconfident by $\delta$, their contributions cancel and $\mathrm{ECE} = 0$ even though the predictor is calibrated nowhere in that bin, so a small ECE does not by itself establish calibration. Second, the plug-in estimator is biased, and its bias and variance both depend on the bin count $M$: more bins reduce the binning bias but make $\mathrm{acc}(B_m)$ noisier, so the reported number depends on an unspecified hyperparameter and is optimistically biased when $M$ is chosen after seeing the data [@kumar2019verified]. Honest calibration reporting therefore states the binning scheme and, where possible, uses an estimator with a known bias [@kumar2019verified].
+
+For embeddings used in retrieval — finding the nearest ligand, the most similar structure, or the best-matching sequence — recall@*k*, mean reciprocal rank, and median rank are the appropriate metrics, as in contrastive retrieval evaluation [@radford2021learning]. These ranks are defined over a candidate pool, so the pool size and composition must be reported or the numbers mean nothing.
+
+When no labels exist at all, two label-free properties predict downstream quality for contrastively trained embeddings: *alignment* and *uniformity* [@wang2020understanding]. With encoder $f$ (typically producing $\ell_2$-normalised vectors), positive pairs $(\mathbf{x}, \mathbf{y}) \sim p_{\mathrm{pos}}$, and negatives drawn from the data distribution $p_{\mathrm{data}}$,
+
+$$
+\mathcal{L}_{\mathrm{align}} = \mathbb{E}_{(\mathbf{x}, \mathbf{y}) \sim p_{\mathrm{pos}}} \big\lVert f(\mathbf{x}) - f(\mathbf{y}) \big\rVert_2^2,
+\qquad
+\mathcal{L}_{\mathrm{uniform}} = \log \mathbb{E}_{\mathbf{x}, \mathbf{y} \sim p_{\mathrm{data}}} e^{-2 \lVert f(\mathbf{x}) - f(\mathbf{y}) \rVert_2^2},
+$$ {#eq-ch11-alignment-uniformity}
+
+where low alignment loss means positive pairs are close and low uniformity loss means features spread over the hypersphere rather than collapsing to a point (@eq-ch11-alignment-uniformity). Both are computable without labels and serve as diagnostic complements to task metrics, never as replacements for them [@wang2020understanding].
+
+No single number suffices. A credible report includes at least one ranking metric, one threshold-dependent metric, a calibration check, and confidence intervals that reflect the variability of the split.
+
+# Reproducibility and reporting checklist
+
+Evaluation of biological representations has repeatedly been shown to be sensitive to details of data handling, so reporting must be explicit. A minimal checklist:
+
+- State the exact splits (random, grouped, scaffold, temporal, or a specific homology threshold) and release the identifiers used for each fold.
+- Report the probe — its type, capacity, and hyperparameters — and whether the encoder was frozen or fine-tuned.
+- Report every metric with a confidence interval and the number of test examples.
+- Report preprocessing: tokenisation, normalisation, filtering, and any dimensionality reduction applied before the probe.
+- Report at least one distribution-shifted evaluation.
+- Provide enough detail to rerun the study, including random seeds and code or model versions.
+
+These practices parallel the broader call for systematic, transparent evaluation of large models and their downstream behaviour [@bommasani2021opportunities].
+
+# Pitfalls at a glance
+
+The recurring failures of biological embedding evaluation are summarised below. Detection is what you look for; mitigation is the change that removes the failure.
+
+| Pitfall | Detection | Mitigation |
+|---|---|---|
+| Homology leakage | Test items have close training relatives; performance on unseen families collapses | Cluster at an identity threshold and split by cluster [@fu2012cdhit; @teufel2023graphpart] |
+| Duplicate records | Identical or near-identical examples appear across splits | Deduplicate before splitting [@bernett2024guiding] |
+| Scaffold leakage | Random molecule splits far exceed scaffold splits | Split by scaffold [@bemis1996properties; @chuang2018adversarial] |
+| Temporal leakage | Future information enters features or splits | Train on the past, test on the future |
+| Confounded batches | Embeddings separate batches better than biology | Batch-aware splits and integration evaluation [@luecken2022benchmarking] |
+| Overfitting model selection | Many configurations tried; the test set is reused | Nested cross-validation and a locked test set |
+| Metric misuse | High AUROC but poor precision at realistic prevalence | Report AUPRC together with prevalence [@saito2015precision] |
+| Uncalibrated scores | Predicted probabilities track neither accuracy nor error | Calibration curves and temperature scaling [@guo2017calibration] |
+| Visual evaluation | Conclusions drawn from a two-dimensional scatter plot alone | Treat projections as qualitative (see Chapter 12) |
+
+: Recurring evaluation pitfalls, how to detect them, and how to mitigate them.
+
+# Designing a leak-free evaluation protocol
+
+The decisions above compose into a protocol. The flow below makes the branching explicit: depending on label availability, the relatedness of examples, and the expected shift, both the correct probe and the correct split change.
+
+```{mermaid}
+flowchart TD
+  A["New embedding"] --> B{"Labels for the target task?"}
+  B -- "No" --> C["Zero-shot: retrieval, clustering, or nearest-neighbor"]
+  B -- "Yes" --> D{"Enough labels to fine-tune?"}
+  D -- "No" --> E["Frozen embedding, linear probe or k-NN"]
+  D -- "Yes" --> F["Fine-tune the encoder or train a supervised head"]
+  E --> G{"Are examples related? (homology, scaffold, donor, time)"}
+  F --> G
+  G -- "Yes" --> H["Cluster examples and split by group"]
+  G -- "No" --> I["Random splits are acceptable"]
+  H --> J["Report metric, calibration, and confidence intervals on held-out groups"]
+  I --> J
+  J --> K{"Distribution shift expected?"}
+  K -- "Yes" --> L["Add an out-of-distribution test set (new family, organism, batch)"]
+  K -- "No" --> M["Release split definitions and preprocessing"]
+  L --> M
+```
+
+Following this flow does not guarantee a useful model, but it removes the failure modes that make reported performance meaningless. The remaining uncertainty — whether a representation generalises to genuinely new biology — is a scientific question that only an honest out-of-distribution test can answer.
+
+::: {.callout-tip}
+## Key Takeaways
+- Separate the probe from the representation: linear probing, fine-tuning, *k*-NN, and clustering answer different questions and are not interchangeable [@alain2016understanding; @rao2019evaluating].
+- Choose benchmarks whose splits match the claim being made; TAPE and BEND exist because random splits overstate performance [@rao2019evaluating; @dallatorre2025nucleotide].
+- Detect and remove structural leakage — homology, duplicates, scaffolds, time — before trusting any number [@whalen2022navigating; @bernett2024guiding].
+- Include at least one distribution-shifted test; in-distribution results overstate transfer to new families, organisms, and batches [@luecken2022benchmarking].
+- Match the metric to the regime: AUPRC and calibration matter when classes are imbalanced and predicted probabilities are used [@saito2015precision; @guo2017calibration].
+- Report splits, probes, metrics, and uncertainty in enough detail for independent reruns [@bommasani2021opportunities].
+:::
+
+## Further Reading
+
+- Whalen et al. survey the pitfalls of applying machine learning in genomics and how to avoid them [@whalen2022navigating].
+- Bernett et al. give a question-driven guide to identifying data leakage in biological machine learning [@bernett2024guiding].
+- Rao et al. define the TAPE benchmark and its probe and fine-tune protocols [@rao2019evaluating].
+- Dalla-Torre et al. introduce the Nucleotide Transformer models and the BEND benchmark [@dallatorre2025nucleotide].
+- Luecken et al. benchmark single-cell data integration and the metrics used to score it [@luecken2022benchmarking].
+- Saito and Rehmsmeier explain why precision-recall is preferable to ROC under class imbalance [@saito2015precision].

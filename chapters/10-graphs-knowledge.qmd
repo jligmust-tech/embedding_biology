@@ -2,9 +2,454 @@
 title: "Graphs, Networks, and Knowledge-Graph Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 10*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+Much biological knowledge is relational. Proteins interact with proteins, genes
+regulate genes, enzymes catalyse reactions in pathways, and drugs act on targets
+that are implicated in diseases. A single entity is rarely informative in
+isolation; its role emerges from its neighbors. This chapter treats relational
+data as a graph, defines embeddings of its nodes and edges, and distinguishes
+three prediction tasks that are easy to confuse: node-level prediction,
+edge-level (link) prediction, and knowledge-graph completion. It then moves from
+shallow random-walk embeddings to graph neural networks and multi-relational
+knowledge-graph embeddings, and closes with applications in drug repurposing,
+target identification, and function prediction.
+
+Following Appendix A, vectors are bold lowercase ($\mathbf{z}$, $\mathbf{e}$),
+matrices are bold uppercase ($\mathbf{A}$, $\mathbf{D}$, $\mathbf{W}$), and
+scalars are italic. A graph has $n=|V|$ nodes; node embeddings at layer $l$ are
+$\mathbf{z}_v^{(l)} \in \mathbb{R}^{d_l}$ and are stacked row-wise into
+$\mathbf{Z}^{(l)} \in \mathbb{R}^{n \times d_l}$; a knowledge-graph fact
+$(h,r,t)$ has head, relation, and tail embeddings
+$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^k$ (or $\mathbb{C}^k$ for
+the complex models); $\sigma$ is the logistic sigmoid and $\odot$ the Hadamard
+product.
+
+# Biological Graphs and Their Properties
+
+::: {.callout-note}
+## Definition
+**Graph.** A graph $G = (V, E)$ consists of a set of nodes $V$ and a set of edges
+$E \subseteq V \times V$. In a *typed* or *heterogeneous* graph each node and edge
+carries a type; a knowledge-graph fact is a triple $(h, r, t)$ with a head entity
+$h$, relation $r$, and tail entity $t$, and such triples are the atomic facts of a
+knowledge graph.
 :::
 
-TODO
+Biological graphs differ along four axes: what the nodes are, whether edges are
+directed, whether edges are weighted or signed, and whether the graph is
+homogeneous or typed.
+
+| Graph | Nodes | Edges | Typical source |
+|:--|:--|:--|:--|
+| Protein--protein interaction | Proteins | Physical or functional association, weighted by confidence | STRING [@szklarczyk2019string] |
+| Gene regulatory | Genes / transcription factors | Directed regulatory influence | Reconstructed from expression and binding data |
+| Metabolic | Metabolites | Enzyme-catalysed reactions | KEGG pathways [@kanehisa2000kegg] |
+| Gene--disease | Genes and diseases | Undirected associations | DisGeNET [@pinero2020disgenet] |
+| Biomedical knowledge graph | Drugs, genes, diseases, pathways | Typed relations | Hetionet [@himmelstein2017systematic] |
+
+Several properties shape algorithm choice. Interaction graphs are noisy and
+incomplete, so the goal is often to denoise or complete them rather than classify
+existing edges. Regulatory graphs are directed and asymmetric, so a
+neighborhood-aggregation scheme that ignores direction loses information.
+Gene--disease and drug--gene graphs are heterogeneous, so a single relation type
+cannot represent them. These graphs also tend to be sparse and heavy-tailed, with
+a few high-degree hubs and many low-degree nodes, which biases random-walk and
+message-passing methods toward hubs unless corrected.
+
+# Shallow Node Embeddings
+
+The first generation of graph embeddings reuses the shallow prediction objectives
+of Chapter 3. A random walk over the graph produces sequences of nodes, and a
+skip-gram model learns one vector per node from those sequences.
+
+DeepWalk runs uniform random walks from each node and trains the SGNS objective on
+the resulting (node, context) pairs [@perozzi2014deepwalk]. node2vec generalizes
+the walk distribution with return and in-out parameters $p$ and $q$, controlling
+whether the walk revisits its origin and whether it explores locally or
+globally [@grover2016node2vec]. With node embedding $\mathbf{z}_u \in \mathbb{R}^k$
+and context embedding $\mathbf{z}_c \in \mathbb{R}^k$, pair set $\mathcal{D}$
+sampled from walks, $K$ negatives, and noise distribution $P_n$, the objective
+
+$$
+\mathcal{L}_{\text{walk}}(\{\mathbf{z}\})
+= \sum_{(u,c) \in \mathcal{D}}
+\Big[ \log \sigma(\mathbf{z}_u^\top \mathbf{z}_c)
++ \sum_{j=1}^{K} \mathbb{E}_{c_j \sim P_n}\!
+\big( \log \sigma(-\mathbf{z}_u^\top \mathbf{z}_{c_j}) \big) \Big]
+$$ {#eq-ch10-walk-sgns}
+
+is maximized over the per-node vectors $\{\mathbf{z}_u\}$. (@eq-ch10-walk-sgns)
+is exactly the SGNS objective of Chapter 3, so by the same argument it implicitly
+factorizes a shifted pointwise mutual information matrix over walk co-occurrences
+(Chapter 3): nodes that co-occur on many walks receive aligned vectors, which
+is why the walk distribution — not the network — determines the geometry. Because
+every node has a single learned vector, the embedding is *transductive*: nodes
+unseen at training time have no vector, and the method cannot be applied to a new
+screen without retraining. LINE instead optimizes two objectives that preserve
+first-order proximity (observed edges) and second-order proximity (shared
+neighborhoods) separately [@tang2015line]. Shallow embeddings are cheap and strong
+on homogeneous graphs, but this transductive limitation motivates the inductive
+architectures below.
+
+# Graph Neural Networks
+
+Graph neural networks (GNNs) learn node representations by passing messages along
+edges, which makes them inductive and able to incorporate node features. The graph
+neural network model is the original formulation [@scarselli2009graph]; the modern
+view is the message-passing framework, in which each node updates its state from
+its neighbors:
+
+$$
+\mathbf{z}_v^{(l+1)}
+= \phi\!\left( \mathbf{z}_v^{(l)}, \;
+\underset{u \in \mathcal{N}(v)}{\bigoplus} \;
+\psi\!\left( \mathbf{z}_v^{(l)}, \mathbf{z}_u^{(l)}, \mathbf{e}_{uv} \right) \right),
+$$ {#eq-ch10-mp}
+
+where $\mathbf{z}_v^{(l)} \in \mathbb{R}^{d_l}$ is the representation of node $v$
+at layer $l$, $\mathcal{N}(v)$ is its neighborhood, $\mathbf{e}_{uv}$ is an
+optional edge feature, $\psi$ is a (learnable) message function, $\phi$ is a
+(learnable) update function, and $\bigoplus$ is a permutation-invariant
+aggregation such as sum, mean, or max
+[@gilmer2017neural]. (@eq-ch10-mp) is applied to every node in parallel, so
+the trainable parameters are shared across nodes; a GNN stacks such layers, and
+the receptive field of a node therefore grows with depth. The permutation
+invariance of $\bigoplus$ is not optional — it is required so that isomorphic
+neighborhoods receive the same update.
+
+::: {.callout-note}
+## Definition
+**Message passing.** Message passing is an iterative scheme in which each node
+computes a message from each neighbor, aggregates the messages with a
+permutation-invariant operator, and combines the aggregate with its own state to
+produce a new state. Two isomorphic neighborhoods must receive the same update,
+which forces the aggregator to be permutation-invariant.
+:::
+
+## Layer Variants
+
+Specific GNNs differ in how they define $\psi$, $\phi$, and the aggregator. The
+graph convolutional network (GCN) arises as a first-order approximation of a
+spectral graph convolution. With the symmetric normalized Laplacian
+$\mathbf{L} = \mathbf{I} - \mathbf{D}^{-1/2}\mathbf{A}\mathbf{D}^{-1/2}$ and its
+eigendecomposition $\mathbf{L} = \mathbf{U}\boldsymbol{\Lambda}\mathbf{U}^\top$, a
+spectral convolution filters a signal $\mathbf{x}$ by
+$g_\theta \star \mathbf{x} = \mathbf{U}\,g_\theta(\boldsymbol{\Lambda})\,\mathbf{U}^\top \mathbf{x}$;
+approximating the filter by a first-order Chebyshev polynomial in the shifted
+spectrum, $g_\theta(\boldsymbol{\Lambda}) \approx \theta_0 \mathbf{I} + \theta_1 (\boldsymbol{\Lambda} - \mathbf{I})$
+(eigenvalues of $\mathbf{L}$ lie in $[0,2]$, so $\lambda_{\max}=2$), gives
+
+$$
+g_\theta \star \mathbf{x}
+\;\approx\; \theta_0 \mathbf{x} - \theta_1 \mathbf{D}^{-1/2}\mathbf{A}\mathbf{D}^{-1/2}\mathbf{x}
+\;=\; \theta\left(\mathbf{I} + \mathbf{D}^{-1/2}\mathbf{A}\mathbf{D}^{-1/2}\right)\mathbf{x},
+$$ {#eq-ch10-spectral}
+
+where the second equality sets $\theta = \theta_0 = -\theta_1$, and a
+renormalization trick replaces
+$\mathbf{I} + \mathbf{D}^{-1/2}\mathbf{A}\mathbf{D}^{-1/2}$ by
+$\tilde{\mathbf{D}}^{-1/2}\tilde{\mathbf{A}}\tilde{\mathbf{D}}^{-1/2}$ with
+$\tilde{\mathbf{A}} = \mathbf{A} + \mathbf{I}$ to avoid numerical instability
+[@bruna2014spectral; @defferrard2016convolutional; @kipf2017semi]. The
+approximation (@eq-ch10-spectral) is local — each output depends only on a node and its
+immediate neighbors — which is what makes it practical on large biological graphs.
+Stacking this local filter and adding a trainable weight matrix $\mathbf{W}^{(l)}$
+yields the GCN layer
+
+$$
+\mathbf{Z}^{(l+1)} = \mathrm{ReLU}\!\left(
+\tilde{\mathbf{D}}^{-1/2} \tilde{\mathbf{A}} \tilde{\mathbf{D}}^{-1/2}
+\mathbf{Z}^{(l)} \mathbf{W}^{(l)}
+\right),
+$$ {#eq-ch10-gcn}
+
+where $\tilde{\mathbf{A}} = \mathbf{A} + \mathbf{I}$ adds self-loops,
+$\tilde{D}_{ii} = \sum_j \tilde{A}_{ij}$ is its degree matrix, $\mathbf{Z}^{(l)}$
+stacks node states, $\mathbf{W}^{(l)} \in \mathbb{R}^{d_l \times d_{l+1}}$ is
+trainable, and $\mathrm{ReLU}$ is the element-wise activation [@kipf2017semi]. Minimizing a
+node-classification loss over the $\{\mathbf{W}^{(l)}\}$ then trains the layer.
+GraphSAGE instead samples a fixed number of neighbors and concatenates the node
+state with an aggregate of sampled neighbor states,
+
+$$
+\mathbf{z}_v^{(l+1)} = \mathrm{ReLU}\!\left(\mathbf{W}^{(l)}
+\left[\, \mathbf{z}_v^{(l)} \,\|\, \mathrm{AGG}
+(\{\mathbf{z}_u^{(l)} : u \in \mathcal{N}(v)\})\,\right]\right),
+$$ {#eq-ch10-sage}
+
+which supports inductive inference on unseen nodes because the aggregator is a
+learned function of features rather than a lookup table
+[@hamilton2017inductive]. Graph attention networks (GATs) weight neighbors with
+learned attention coefficients
+
+$$
+\alpha_{vu} = \frac{\exp\!\left(\mathrm{LeakyReLU}\!\left(
+\mathbf{a}^\top [\mathbf{W}\mathbf{z}_v \,\|\, \mathbf{W}\mathbf{z}_u]\right)\right)}
+{\sum_{k \in \mathcal{N}(v)} \exp\!\left(\mathrm{LeakyReLU}\!\left(
+\mathbf{a}^\top [\mathbf{W}\mathbf{z}_v \,\|\, \mathbf{W}\mathbf{z}_k]\right)\right)},
+\qquad
+\mathbf{z}_v' = \mathrm{ELU}\!\left(\sum_{u \in \mathcal{N}(v)} \alpha_{vu} \mathbf{W}\mathbf{z}_u\right),
+$$ {#eq-ch10-gat}
+
+where $\mathbf{a}$ and $\mathbf{W}$ are shared learnable parameters and $\|$
+denotes vertical concatenation, allowing the model to downweight irrelevant
+neighbors [@velickovic2018graph]. Graph isomorphism networks (GINs) use a sum
+aggregator with an MLP and are provably as expressive as the Weisfeiler--Lehman
+test for distinguishing graphs [@xu2019powerful].
+
+| Layer | Aggregation | Inductive | Relation-aware |
+|:--|:--|:--|:--|
+| GCN [@kipf2017semi] | Degree-normalized weighted sum (@eq-ch10-gcn) | No (fixed graph) | No |
+| GraphSAGE [@hamilton2017inductive] | Sampled mean / LSTM / pool (@eq-ch10-sage) | Yes | No |
+| GAT [@velickovic2018graph] | Attention-weighted sum (@eq-ch10-gat) | Yes | No |
+| GIN [@xu2019powerful] | Sum + MLP | Yes | No |
+| R-GCN [@schlichtkrull2018modeling] | Relation-specific weighted sum (@eq-ch10-rgcn) | Yes | Yes |
+
+The required artifact for this section is the GNN layer variants table above. The
+"relation-aware" column matters for biology because most biomedical graphs are
+typed: a drug *treats* a disease is not the same relation as a drug *binds* a
+protein. Relational graph convolutional networks (R-GCNs) give each relation type
+$r \in \mathcal{R}$ its own weight matrix $\mathbf{W}_r^{(l)}$,
+
+$$
+\mathbf{z}_v^{(l+1)} = \mathrm{ReLU}\!\left(
+\sum_{r \in \mathcal{R}} \sum_{u \in \mathcal{N}_r(v)}
+\frac{1}{c_{v,r}} \mathbf{W}_r^{(l)} \mathbf{z}_u^{(l)}
++ \mathbf{W}_0^{(l)} \mathbf{z}_v^{(l)} \right),
+$$ {#eq-ch10-rgcn}
+
+where $\mathcal{N}_r(v)$ is the set of neighbors of $v$ under relation $r$ and
+$c_{v,r}$ is a per-node, per-relation normalization constant (typically
+$|\mathcal{N}_r(v)|$) [@schlichtkrull2018modeling]. Depth introduces
+over-smoothing, in which node representations converge to the same vector as
+layers stack; in practice two to four layers often suffice for biological graphs.
+
+# Knowledge-Graph Embeddings and Link Prediction
+
+Knowledge-graph (KG) embeddings score the plausibility of triples $(h, r, t)$
+rather than classifying nodes. A model $f:\mathcal{E}\times\mathcal{R}\times\mathcal{E}\to\mathbb{R}$
+maps each triple to a real score, with all entity embeddings
+$\{\mathbf{e}_e\}$ and relation embeddings $\{\mathbf{e}_r\}$ learned jointly.
+Training treats observed triples $\mathcal{T}$ as positives and corrupted triples
+as negatives, and prediction is the ranking of candidate tails for a query
+$(h, r, ?)$. A common training objective maximizes
+
+$$
+\mathcal{L}_{\text{KG}}(\{\mathbf{e}\})
+= \sum_{(h,r,t) \in \mathcal{T}}
+\Big[ \log \sigma\!\left(f(h,r,t)\right)
++ \sum_{j=1}^{K} \mathbb{E}_{(h'_j, r, t'_j) \sim P_n}\!
+\big( \log \sigma(-f(h'_j, r, t'_j)) \big) \Big]
+$$ {#eq-ch10-kg-loss}
+
+over all entity and relation embeddings, where each negative
+$(h'_j, r, t'_j)$ is formed by corrupting the head or the tail of a true triple and
+$P_n$ is the corruption distribution [@bordes2013translating]. (@eq-ch10-kg-loss) is a logistic ranking (negative-sampling) objective; its failure
+mode is easy negatives, since random corruptions are often trivially false and
+inflate apparent link-prediction accuracy. This is why the different score
+functions below are compared only under a shared negative-sampling protocol.
+
+TransE models a relation as a translation in the embedding space, so that the
+tail is close to the head displaced by the relation vector
+[@bordes2013translating]. Its score is
+
+$$
+f(h, r, t) = -\,\lVert \mathbf{e}_h + \mathbf{e}_r - \mathbf{e}_t \rVert_2,
+$$ {#eq-ch10-transe}
+
+where $\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^k$ are the
+embeddings of head, relation, and tail. TransE is simple and strong on one-to-one
+relations but fails on one-to-many, many-to-one, and symmetric relations. The
+symmetric failure is exact: if $r$ is symmetric then both $(h,r,t)$ and $(t,r,h)$
+are true, and requiring a high score (@eq-ch10-transe) for both forces
+
+$$
+\mathbf{e}_h + \mathbf{e}_r \approx \mathbf{e}_t
+\quad \text{and} \quad
+\mathbf{e}_t + \mathbf{e}_r \approx \mathbf{e}_h
+\;\;\Longrightarrow\;\;
+2\,\mathbf{e}_r \approx \mathbf{0}
+\;\;\text{and}\;\;
+\mathbf{e}_h \approx \mathbf{e}_t,
+$$ {#eq-ch10-transe-sym}
+
+(@eq-ch10-transe-sym) drives the relation vector to the origin and collapses
+every entity participating in a symmetric relation to the same point, destroying
+their distinguishability; the same argument makes one-to-many relations
+non-identifiable, since $(h,r,t_1)$ and $(h,r,t_2)$ force
+$\mathbf{e}_{t_1} \approx \mathbf{e}_{t_2}$ [@bordes2013translating]. This
+non-identifiability is the motivation for rotation- and product-based scores.
+
+RotatE models each relation as a rotation in complex space, so a relation can map
+one head to several tails. Writing the complex embeddings
+$\mathbf{e}_h, \mathbf{e}_t \in \mathbb{C}^k$ with per-coordinate modulus at most
+one, the score is
+
+$$
+f(h, r, t) = -\,\lVert \mathbf{e}_h \odot \mathbf{e}_r - \mathbf{e}_t \rVert_2,
+\qquad
+e_r[j] = e^{\,i\theta_j},
+$$ {#eq-ch10-rotate}
+
+where $\odot$ is the Hadamard product and $\theta_j$ is the phase of relation $r$
+in dimension $j$; the constraint $|e_r[j]| = 1$ makes $\mathbf{e}_r$ a unit-modulus
+rotation [@sun2019rotate]. Because rotations compose, RotatE represents symmetry
+($\theta_j \in \{0, \pi\}$), antisymmetry ($\theta_j \notin \{0,\pi\}$ gives
+$\mathbf{e}_r \neq \mathbf{e}_r^{-1}$), inversion, and composition patterns that
+TransE cannot; its limitations are the fixed dimensional budget and the fact that
+composition in its relation space is additive in the phases $\theta_j$ and hence
+commutative, so it cannot represent a non-commutative composition pattern.
+
+DistMult simplifies the bilinear family to a real trilinear score,
+
+$$
+f(h, r, t) = \sum_{j} e_h[j]\, e_r[j]\, e_t[j],
+$$ {#eq-ch10-distmult}
+
+which is efficient but manifestly symmetric in head and tail,
+$f(h,r,t) = f(t,r,h)$, and therefore cannot represent directed or antisymmetric
+relations: for any antisymmetric relation the model must assign the same score to
+$(h,r,t)$ and $(t,r,h)$, so it cannot rank one above the other
+[@yang2015embedding].
+
+ComplEx restores asymmetry with a complex bilinear product. For
+$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{C}^k$, the score is
+
+$$
+f(h, r, t) = \mathrm{Re}\!\left(\langle \mathbf{e}_h, \mathbf{e}_r, \overline{\mathbf{e}_t} \rangle\right)
+= \mathrm{Re}\!\left(\sum_{j} e_h[j]\, e_r[j]\, \overline{e_t[j]}\right),
+$$ {#eq-ch10-complex}
+
+where the bar denotes complex conjugation [@trouillon2016complex]. ComplEx models
+antisymmetry: writing $\Re(e_\ast[j]) = a_\ast^{(j)}$ and
+$\Im(e_\ast[j]) = b_\ast^{(j)}$, the difference between a triple and its reversal
+is
+
+$$
+f(h,r,t) - f(t,r,h)
+= 2 \sum_{j} b_r^{(j)}
+\!\left( a_h^{(j)} b_t^{(j)} - a_t^{(j)} b_h^{(j)} \right),
+$$ {#eq-ch10-complex-antisym}
+
+(@eq-ch10-complex-antisym) is nonzero whenever some relation coordinate has
+nonzero imaginary part $b_r^{(j)} \neq 0$ and the head and tail embeddings are not
+trivially aligned; the score is therefore genuinely asymmetric, unlike DistMult (the real special case
+$\Im \equiv 0$) [@trouillon2016complex]. Note that a high score for $(h,r,t)$ no
+longer implies a high score for $(t,r,h)$, which is exactly what directed
+biomedical relations such as *treats* or *binds* require. The choice among these
+models therefore follows the relational patterns present in the graph, summarized
+by which of symmetry, antisymmetry, inversion, and composition each can represent.
+
+::: {#fig-kg-linkpred}
+**Figure description.** Knowledge-graph link prediction. A heterogeneous graph
+contains typed entities (drug $d$, protein $p$, disease $s$) connected by typed
+relations (binds, associated with, treats). The model embeds every entity and
+relation and scores each candidate triple by a relation-specific function $f(h, r,
+t)$ — translation for TransE (@eq-ch10-transe), rotation for RotatE (@eq-ch10-rotate), or a
+bilinear product for DistMult (@eq-ch10-distmult) and ComplEx (@eq-ch10-complex). For a query
+$(d, \text{treats}, ?)$, the model ranks all diseases by their scores; the
+highest-ranked true-but-unobserved disease is the link-prediction output,
+evaluated by mean reciprocal rank and Hits@$K$.
+:::
+
+A descriptive figure of the link-prediction workflow is given in
+@fig-kg-linkpred. The evaluation protocol — corrupt the tail (and head), score
+positives against negatives, and report mean reciprocal rank and Hits@$K$ — is
+shared across TransE, RotatE, ComplEx, and DistMult, which makes their results
+comparable when the same negative-sampling scheme is used. See Chapter 11 for the
+pitfalls of biased or easy negative sampling.
+
+# Applications
+
+The three prediction tasks now separate cleanly. *Node classification* predicts a
+property of a node, such as the functional class of a protein. *Link prediction*
+predicts whether an edge exists or will exist, such as a novel drug--target
+interaction. *Knowledge-graph completion* predicts the missing tail of a typed
+triple, such as the disease a drug may treat.
+
+Drug repurposing is the most prominent KG application. Hetionet integrates
+heterogeneous biomedical knowledge into a single graph and shows that a graph
+algorithm connecting compounds to diseases can prioritize existing drugs for new
+indications [@himmelstein2017systematic]. Decagon extends this idea to
+polypharmacy by modeling drug--drug side effects and the underlying
+protein--protein interactions with a relational GCN (@eq-ch10-rgcn), treating
+side-effect prediction as a link-prediction problem over typed edges
+[@zitnik2018modeling].
+
+Target identification reuses the same machinery in the opposite direction: given
+a disease, rank proteins or genes by their connection to disease-associated nodes.
+Function prediction applies GNNs to protein structure graphs; DeepFRI, for
+example, trains a graph convolutional network (@eq-ch10-gcn) on residue contact graphs
+to predict Gene Ontology terms, showing that structure-derived graph embeddings
+transfer to function annotation [@gligorijevic2021structure]. In each case the
+embedding is not the end product — the ranking of candidate edges or labels is.
+
+Node classification on interaction graphs is the natural counterpart of link
+prediction. The setting is inductive when the model must annotate nodes that were
+absent during training, which occurs whenever a new screen adds proteins to an
+existing network. GraphSAGE (@eq-ch10-sage) evaluates exactly this regime on
+protein--protein interaction graphs, predicting functional roles from a node's own
+features and an aggregate of its neighbors' features rather than from a fixed
+lookup table [@hamilton2017inductive]. The same inductive property is what allows
+a GNN trained on one organism's network to embed a related organism's nodes
+without retraining, provided that node features are defined consistently across
+the two graphs.
+
+A recurring methodological point links these applications. The graph is almost
+always incomplete, so a model that scores only observed edges learns to reproduce
+the biases of the databases on which it was trained. Reporting link-prediction
+quality therefore requires held-out edges sampled in a way that respects the
+graph's structure, and it requires distinguishing performance on edges that are
+easy to guess from high-degree hubs from performance on the sparse periphery. The
+evaluation protocols of Chapter 11 apply directly here; the graph-specific
+complication is that random edge splits leak information through shared
+neighborhoods far more readily than random splits of independent examples.
+
+# Heterogeneity and Scale
+
+Two practical pressures dominate. The first is heterogeneity: biomedical graphs
+contain several node and edge types, and a homogeneous GNN must collapse them,
+losing relational information. Relational GCNs (@eq-ch10-rgcn) address typed edges
+[@schlichtkrull2018modeling], and metapath2vec generalizes random-walk embeddings
+to heterogeneous networks by guiding walks along typed meta-paths — for example
+drug→protein→disease — so that co-occurrence statistics respect relation
+types [@dong2017metapath2vec]. The second pressure is scale: biomedical knowledge
+graphs reach millions of nodes and tens of millions of edges, which makes
+full-batch training and dense attention infeasible. Sampling-based training, as in
+GraphSAGE, and standardized large-scale benchmarks such as the Open Graph
+Benchmark make results reproducible and comparable [@hu2020open]. Temporal and
+multiplex graphs add a further axis: edges appear and vanish over time and the
+same node participates in several edge types, so a single static embedding is an
+approximation that must be justified by the task.
+
+::: {.callout-tip}
+## Key Takeaways
+- Node, edge, and knowledge-graph prediction are distinct tasks; the embedding
+  and the evaluation metric must match the task.
+- Shallow embeddings (DeepWalk, node2vec, LINE) factorize co-occurrence over
+  walks (@eq-ch10-walk-sgns) and are strong on homogeneous graphs but cannot embed
+  unseen nodes.
+- GNNs generalize these methods through permutation-invariant message passing
+  (@eq-ch10-mp); GCN (@eq-ch10-gcn), GraphSAGE (@eq-ch10-sage), GAT (@eq-ch10-gat), GIN, and R-GCN
+  (@eq-ch10-rgcn) differ in aggregation and in whether they handle relation types.
+- KG embeddings score typed triples; TransE (@eq-ch10-transe), RotatE (@eq-ch10-rotate),
+  DistMult (@eq-ch10-distmult), and ComplEx (@eq-ch10-complex) encode different relational
+  patterns, so the model must match the graph's relations.
+- Biomedical graphs are heterogeneous, sparse, and heavy-tailed, so relation-aware
+  and sampling-based models are usually necessary at scale.
+:::
+
+## Further Reading
+
+- Perozzi, Al-Rfou, and Skiena, *DeepWalk* (2014) [@perozzi2014deepwalk] — the
+  origin of random-walk node embeddings.
+- Grover and Leskovec, *node2vec* (2016) [@grover2016node2vec] — biased walks and
+  the community-versus-role trade-off.
+- Kipf and Welling, *Semi-Supervised Classification with Graph Convolutional
+  Networks* (2017) [@kipf2017semi] — the canonical GCN layer.
+- Hamilton, Ying, and Leskovec, *Inductive Representation Learning on Large
+  Graphs* (2017) [@hamilton2017inductive] — GraphSAGE and inductive inference.
+- Veličković et al., *Graph Attention Networks* (2018) [@velickovic2018graph] —
+  attention over neighbors.
+- Bordes et al., *Translating Embeddings for Modeling Multi-relational Data*
+  (2013) [@bordes2013translating] and Sun et al., *RotatE* (2019)
+  [@sun2019rotate] — the reference points for knowledge-graph completion.

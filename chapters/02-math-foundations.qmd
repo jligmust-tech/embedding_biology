@@ -2,9 +2,205 @@
 title: "Mathematical Foundations of Representation Learning"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 2*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+# Vectors, Norms, and Similarity
+
+An embedding is a vector $\mathbf{z} \in \mathbb{R}^d$, where $d$ is the embedding dimension of Appendix A. Everything this book does with embeddings — retrieval, clustering, classification, alignment — is ultimately a statement about the geometry of such vectors. This chapter fixes the small set of tools required to read the rest of the book: inner products, norms, distances, the geometry of high-dimensional spaces, the three standard dimensionality-reduction methods, and the operations that make embedding spaces comparable. Notation follows Appendix A and is restated here where used.
+
+The **inner product** of two vectors $\mathbf{u}, \mathbf{v} \in \mathbb{R}^d$ is
+
+$$ \langle \mathbf{u}, \mathbf{v} \rangle \;=\; \mathbf{u}^\top \mathbf{v} \;=\; \sum_{i=1}^{d} u_i v_i, $$ {#eq-ch02-inner}
+
+where $u_i, v_i \in \mathbb{R}$ are the components of $\mathbf{u}$ and $\mathbf{v}$. The inner product is bilinear and symmetric; it measures alignment between the two vectors and is large and positive when they point in similar directions, but it also scales with the length of both vectors (@eq-ch02-inner). Its derived quantity, the **norm**, measures length.
+
+::: {.callout-note}
+## Definition
+
+For $p \ge 1$, the **$\ell_p$ norm** of $\mathbf{u} \in \mathbb{R}^d$ is
+$$ \lVert \mathbf{u} \rVert_p \;=\; \Bigl( \sum_{i=1}^{d} \lvert u_i \rvert^p \Bigr)^{1/p}. $$ {#eq-ch02-norm}
+The Euclidean norm is $\lVert \mathbf{u} \rVert_2 = \sqrt{\langle \mathbf{u}, \mathbf{u} \rangle}$; the $\ell_1$ and $\ell_\infty$ norms are $\lVert \mathbf{u} \rVert_1 = \sum_i \lvert u_i \rvert$ and $\lVert \mathbf{u} \rVert_\infty = \max_i \lvert u_i \rvert$. For any $p \ge 1$ the norm induces a distance $D(\mathbf{u},\mathbf{v}) = \lVert \mathbf{u} - \mathbf{v} \rVert_p$ that is translation-invariant and, for $p=2$, rotation-invariant (@eq-ch02-norm).
 :::
 
-TODO
+**Cosine similarity** removes the influence of length and measures only direction:
+
+$$ S_{\cos}(\mathbf{u}, \mathbf{v}) \;=\; \frac{\langle \mathbf{u}, \mathbf{v} \rangle}{\lVert \mathbf{u} \rVert_2 \, \lVert \mathbf{v} \rVert_2} \;\in\; [-1, 1], \qquad d_{\cos}(\mathbf{u}, \mathbf{v}) \;=\; 1 - S_{\cos}(\mathbf{u}, \mathbf{v}) \;\in\; [0, 2], $$ {#eq-ch02-cosine}
+
+defined for nonzero $\mathbf{u}, \mathbf{v}$; the quantity is undefined at the origin, where no direction exists. $S_{\cos}$ measures the angle between the vectors and is invariant to positive rescaling, $S_{\cos}(\alpha \mathbf{u}, \mathbf{v}) = S_{\cos}(\mathbf{u}, \mathbf{v})$ for $\alpha > 0$, whereas $d_{\cos}$ is the corresponding angular distance (@eq-ch02-cosine). The two most common choices — cosine and Euclidean — are tightly related. Expanding the squared Euclidean distance gives the polarization identity
+
+$$ \lVert \mathbf{u} - \mathbf{v} \rVert_2^2 \;=\; \lVert \mathbf{u} \rVert_2^2 + \lVert \mathbf{v} \rVert_2^2 - 2 \langle \mathbf{u}, \mathbf{v} \rangle, $$ {#eq-ch02-cosine-euclid}
+
+so that for vectors on the unit sphere, $\lVert \mathbf{u} \rVert_2 = \lVert \mathbf{v} \rVert_2 = 1$, it collapses to $\lVert \mathbf{u} - \mathbf{v} \rVert_2^2 = 2\,d_{\cos}(\mathbf{u}, \mathbf{v})$: on normalized vectors, ranking by Euclidean distance and ranking by cosine distance coincide (@eq-ch02-cosine-euclid). Off the sphere the two diverge precisely through the magnitude terms $\lVert \mathbf{u} \rVert_2^2 + \lVert \mathbf{v} \rVert_2^2$, which is why the choice between them is a decision about whether vector magnitude is meaningful.
+
+When an embedding's norm is an artifact of training — common in word and sequence models, where only direction has been optimized to carry semantics — cosine similarity is appropriate, and it is invariant to rescaling of individual vectors [@mikolov2013efficient]. When magnitude carries information, as in frequency-weighted co-occurrence representations, the raw inner product or Euclidean distance is preferable [@pennington2014glove]. Many biological encoders produce anisotropic spaces in which average cosine similarities are high and cosine distances are compressed; this affects retrieval thresholds and is discussed in the section on embedding spaces below and, for evaluation, in Chapter 11.
+
+# Distance Metrics for Biological Data
+
+A **metric** is a function $D : \mathcal{X} \times \mathcal{X} \to \mathbb{R}_{\ge 0}$ on a set $\mathcal{X}$ satisfying, for all $\mathbf{u}, \mathbf{v}, \mathbf{w} \in \mathcal{X}$,
+
+$$ \begin{aligned}
+&\text{(i) non-negativity and identity: } D(\mathbf{u},\mathbf{v}) \ge 0 \ \text{and} \ D(\mathbf{u},\mathbf{v}) = 0 \iff \mathbf{u} = \mathbf{v}, \\
+&\text{(ii) symmetry: } D(\mathbf{u},\mathbf{v}) = D(\mathbf{v},\mathbf{u}), \\
+&\text{(iii) triangle inequality: } D(\mathbf{u},\mathbf{w}) \le D(\mathbf{u},\mathbf{v}) + D(\mathbf{v},\mathbf{w}).
+\end{aligned} $$ {#eq-ch02-metric}
+
+Some useful biological dissimilarities satisfy only a subset of these properties (@eq-ch02-metric), which matters when a downstream algorithm assumes a metric — for example, clustering with a centroid, or k-nearest-neighbor graphs built with metric trees.
+
+::: {.callout-note}
+## Definition
+
+The **Mahalanobis distance** with respect to a symmetric positive-definite covariance matrix $\boldsymbol{\Sigma} \in \mathbb{R}^{d \times d}$ is
+$$ d_M(\mathbf{u}, \mathbf{v}) \;=\; \sqrt{(\mathbf{u} - \mathbf{v})^\top \boldsymbol{\Sigma}^{-1} (\mathbf{u} - \mathbf{v})}. $$ {#eq-ch02-mahalanobis}
+It rescales each direction by its inverse standard deviation and decorrelates the coordinates: it equals the Euclidean distance in whitened coordinates, $d_M(\mathbf{u},\mathbf{v}) = \lVert \boldsymbol{\Sigma}^{-1/2}(\mathbf{u} - \mathbf{v}) \rVert_2$. It requires $\boldsymbol{\Sigma}$ to be invertible, equivalently of full rank; when $\boldsymbol{\Sigma}$ is singular one uses a pseudoinverse or a ridge-regularized inverse, and when $\boldsymbol{\Sigma} = I$ the distance reduces to Euclidean [@mahalanobis1936generalised].
+:::
+
+Table 2.1 collects the metrics this book uses, together with what each assumes and where it appears. Two families deserve emphasis because they are *not* vector-space distances. **Edit distance**, introduced by Levenshtein, counts the minimum number of single-character insertions, deletions, and substitutions that transform one string into another [@levenshtein1966binary]. For strings $s$ and $t$ over an alphabet, the Levenshtein distance $d_{\mathrm{lev}}(s, t)$ is computed by the dynamic-programming recursion
+
+$$ d_{\mathrm{lev}}(i, j) \;=\; \min \begin{cases} d_{\mathrm{lev}}(i-1, j) + 1, \\ d_{\mathrm{lev}}(i, j-1) + 1, \\ d_{\mathrm{lev}}(i-1, j-1) + \mathbf{1}[s_i \neq t_j], \end{cases} $$ {#eq-ch02-edit}
+
+over prefixes, with base cases $d_{\mathrm{lev}}(i, 0) = i$, $d_{\mathrm{lev}}(0, j) = j$, and $d_{\mathrm{lev}}(s, t) = d_{\mathrm{lev}}(\lvert s \rvert, \lvert t \rvert)$ (@eq-ch02-edit). **Alignment scores** generalize this idea to biology by allowing gaps and by scoring matches with a substitution matrix: the Needleman–Wunsch algorithm computes an optimal global alignment [@needleman1970general], and the Smith–Waterman algorithm computes optimal local alignments [@smith1981identification]. These dissimilarities operate on sequences directly and are computed by dynamic programming rather than from coordinates; an edit distance is a genuine metric on strings, whereas an alignment score is a similarity and can be converted to a distance only approximately, so sequence-similarity analyses rarely feed a strict metric method without care. Their role here is twofold: they define the *ground-truth* similarity that a sequence embedding is often measured against, and they are the standard reference against which learned representations are compared.
+
+| Metric | Definition | Invariance / assumption | Typical biological use | Caveat |
+|:---|:---|:---|:---|:---|
+| Euclidean ($\ell_2$) | $\lVert \mathbf{u} - \mathbf{v} \rVert_2$ | rotation-, translation-invariant | geometric embeddings; k-means | sensitive to feature scale; magnitude matters |
+| Manhattan ($\ell_1$) | $\sum_i \lvert u_i - v_i \rvert$ | translation-invariant | sparse count-like vectors | ignores correlation between coordinates |
+| Cosine similarity | $\langle \mathbf{u}, \mathbf{v} \rangle / (\lVert \mathbf{u} \rVert_2 \lVert \mathbf{v} \rVert_2)$ | scale-invariant in each vector | word/sequence embeddings | undefined at zero; inflated on anisotropic clouds |
+| Mahalanobis | $\sqrt{(\mathbf{u}-\mathbf{v})^\top \boldsymbol{\Sigma}^{-1} (\mathbf{u}-\mathbf{v})}$ | affine-invariant w.r.t. $\boldsymbol{\Sigma}$ | correlated omics features | needs a reliable $\boldsymbol{\Sigma}$; unstable when $d \gg n$ |
+| Edit (Levenshtein) | min insert/delete/substitute edits [@levenshtein1966binary] | defined on strings | sequence similarity baselines | not a vector distance; no inner product |
+| Alignment score | dynamic-programming optimum [@needleman1970general; @smith1981identification] | handles indels and substitutions | homology, retrieval ground truth | score depends on chosen matrices and gap penalties |
+
+: Table 2.1. Metric cheat-sheet. "Metric" here includes dissimilarities that may violate one or more metric axioms; the caveat column flags the most common violation.
+
+A practical rule follows from the table. If embeddings are compared across models whose norms are not calibrated, cosine similarity is the safer default. If the embeddings are probabilistic or the features are correlated by construction, a whitened or Mahalanobis distance is preferable, provided the covariance can be estimated reliably. If the goal is to match the biologist's notion of homology, the target is an alignment score, and any vector-based metric is only a proxy for it.
+
+# The Curse of Dimensionality and the Manifold Hypothesis
+
+Two ideas explain why raw high-dimensional representations are rarely used directly. The first is the **curse of dimensionality**. As ambient dimension grows, the volume of a region grows so quickly that a fixed number of samples becomes vanishingly sparse, and pairwise distances concentrate. Writing $D_{\min}(\mathbf{u}) = \min_{\mathbf{v} \neq \mathbf{u}} \lVert \mathbf{u} - \mathbf{v} \rVert_2$ and $D_{\max}(\mathbf{u}) = \max_{\mathbf{v} \neq \mathbf{u}} \lVert \mathbf{u} - \mathbf{v} \rVert_2$ for the distances from a fixed point $\mathbf{u}$ to the other points, the *relative contrast* vanishes,
+
+$$ \lim_{d \to \infty} \frac{D_{\max}(\mathbf{u}) - D_{\min}(\mathbf{u})}{D_{\min}(\mathbf{u})} \;=\; 0 $$ {#eq-ch02-concentration}
+
+for broad classes of distributions, so "nearest" and "farthest" neighbors become nearly equidistant and the ratio $D_{\max}(\mathbf{u})/D_{\min}(\mathbf{u}) \to 1$ (@eq-ch02-concentration) [@bellman1957dynamic; @beyer1999nearest]. Density estimation, distance-based retrieval, and clustering all degrade accordingly. This is the practical reason to reduce dimension before visualization or metric learning — not merely to draw a picture.
+
+The second is the **manifold hypothesis**: high-dimensional biological data are not spread uniformly in $\mathbb{R}^d$ but concentrate near a lower-dimensional, possibly curved, manifold [@bengio2013representation]. For protein sequences, physicochemical and evolutionary constraints restrict which strings occur; for single-cell expression profiles, the underlying cell states occupy a much smaller effective dimension than the assay's gene count; for images of cells, lighting and pose are nuisance directions. If the hypothesis holds, a good embedding discovers the intrinsic coordinates of that manifold and discards nuisance variation.
+
+::: {.callout-note}
+## Definition
+
+A **manifold** is a space that locally resembles Euclidean space of some dimension $k$; a $k$-dimensional manifold embedded in $\mathbb{R}^d$ has intrinsic dimension $k$ but ambient dimension $d$. The **manifold hypothesis** states that natural high-dimensional data lie near such a low-dimensional manifold, so that $k \ll d$ suffices to describe them [@bengio2013representation].
+:::
+
+The two ideas are complementary. The curse of dimensionality motivates *reducing* dimension; the manifold hypothesis explains *why* reduction can succeed without destroying information. Neither guarantees that a given method finds the right manifold, which motivates careful attention to what each method optimizes.
+
+# Dimensionality Reduction: PCA, t-SNE, and UMAP
+
+**Principal component analysis (PCA)** is the linear baseline [@pearson1901lines]. Given a data matrix $\mathbf{X} \in \mathbb{R}^{n \times d}$ whose rows are centered embeddings and the sample covariance $\boldsymbol{\Sigma} = \frac{1}{n} \mathbf{X}^\top \mathbf{X} \in \mathbb{R}^{d \times d}$, PCA seeks the unit direction of maximal projected variance,
+
+$$ \max_{\mathbf{w} \in \mathbb{R}^d} \; \mathbf{w}^\top \boldsymbol{\Sigma} \mathbf{w} \quad \text{subject to} \quad \lVert \mathbf{w} \rVert_2 = 1. $$ {#eq-ch02-pca}
+
+The first-order condition shows that the maximizers are the eigenvectors of $\boldsymbol{\Sigma}$ and that the maximum equals the largest eigenvalue $\lambda_1$; the next components solve the same problem subject to orthogonality to the previous ones, so the optimal rank-$k$ projection is $\mathbf{Z} = \mathbf{X} \mathbf{W}_k$ with loading matrix $\mathbf{W}_k = [\mathbf{w}_1, \dots, \mathbf{w}_k] \in \mathbb{R}^{d \times k}$ (@eq-ch02-pca). The variance retained and the squared reconstruction residual are the corresponding eigenvalue sums,
+
+$$ \sum_{j=1}^{k} \lambda_j \quad \text{(variance retained)}, \qquad \frac{1}{n}\bigl\lVert \mathbf{X} - \mathbf{X} \mathbf{W}_k \mathbf{W}_k^\top \bigr\rVert_F^2 \;=\; \sum_{j=k+1}^{d} \lambda_j \quad \text{(residual)}, $$ {#eq-ch02-pca-solution}
+
+so maximizing retained variance and minimizing squared reconstruction error are the same problem, and the latter is the best rank-$k$ approximation in Frobenius norm (the Eckart–Young theorem) [@eckart1936approximation] (@eq-ch02-pca-solution). PCA therefore preserves *global linear* structure and approximates pairwise Euclidean distances; it is deterministic, invertible up to the discarded components, and assumes that the directions of greatest variance are the informative ones and that features are comparably scaled. Because it is linear, it cannot unfold a curved manifold.
+
+**t-SNE** is a nonlinear method designed for visualization [@vandermaaten2008visualizing]. It converts high-dimensional distances into a joint affinity matrix $P$ with entries $p_{ij}$. For each point $\mathbf{x}_i \in \mathbb{R}^d$, a per-point bandwidth $\sigma_i > 0$ defines conditional affinities
+
+$$ p_{j \mid i} \;=\; \frac{\exp\!\bigl(-\lVert \mathbf{x}_i - \mathbf{x}_j \rVert_2^2 / 2\sigma_i^2\bigr)}{\sum_{k \neq i} \exp\!\bigl(-\lVert \mathbf{x}_i - \mathbf{x}_k \rVert_2^2 / 2\sigma_i^2\bigr)}, \qquad p_{ij} \;=\; \frac{p_{j \mid i} + p_{i \mid j}}{2n}, $$ {#eq-ch02-tsne-p}
+
+where $\sigma_i$ is chosen so that each conditional distribution has a prescribed *perplexity* $\operatorname{Perp}(P_i) = 2^{H(P_i)}$, with $H$ the Shannon entropy of Appendix A (@eq-ch02-tsne-p). A low-dimensional map with coordinates $\mathbf{y}_i \in \mathbb{R}^2$ is given affinities from a heavy-tailed Student-$t$ kernel,
+
+$$ q_{ij} \;=\; \frac{(1 + \lVert \mathbf{y}_i - \mathbf{y}_j \rVert_2^2)^{-1}}{\sum_{k \neq l} (1 + \lVert \mathbf{y}_k - \mathbf{y}_l \rVert_2^2)^{-1}}, $$ {#eq-ch02-tsne-q}
+
+and the coordinates $\{\mathbf{y}_i\}$ are chosen to minimize the Kullback–Leibler divergence (@eq-ch02-tsne-q)
+
+$$ \min_{\{\mathbf{y}_i\}} \; D_{\mathrm{KL}}(P \,\lVert\, Q) \;=\; \sum_{i \neq j} p_{ij} \log \frac{p_{ij}}{q_{ij}}. $$ {#eq-ch02-tsne-obj}
+
+The objective matches *neighborhood probabilities*, not distances (@eq-ch02-tsne-obj): it weights errors on nearby high-dimensional pairs (large $p_{ij}$) most heavily and constrains nothing about the global layout, so inter-cluster distances and cluster sizes in a t-SNE plot are not quantitative, and the absence of structure in the gaps between clusters is not evidence of absence in the data [@kobak2019art].
+
+**UMAP** builds a weighted $k$-nearest-neighbor graph from local distances and optimizes a fuzzy-set cross-entropy between the high-dimensional and low-dimensional graph representations [@mcinnes2018umap]. With high-dimensional membership strengths $p_{ij}$ read from the graph and low-dimensional memberships
+
+$$ q_{ij} \;=\; \bigl(1 + a \, \lVert \mathbf{y}_i - \mathbf{y}_j \rVert_2^{2b}\bigr)^{-1}, $$ {#eq-ch02-umap-q}
+
+parametrized by $a, b > 0$ fitted from the data's local structure, the embedding minimizes the cross-entropy (@eq-ch02-umap-q)
+
+$$ \min_{\{\mathbf{y}_i\}} \; \sum_{i \neq j} \Bigl[ \, p_{ij} \log \frac{p_{ij}}{q_{ij}} \;+\; (1 - p_{ij}) \log \frac{1 - p_{ij}}{1 - q_{ij}} \Bigr]. $$ {#eq-ch02-umap-obj}
+
+Like t-SNE, UMAP optimizes agreement of fuzzy neighborhoods rather than distances and is therefore not distance-preserving (@eq-ch02-umap-obj). It is more scalable than t-SNE [@mcinnes2018umap], which is why it became a default in single-cell workflows [@wolf2018scanpy], but its layout must not be read as a faithful map: cluster sizes, inter-cluster distances, and apparent trajectories are shaped by hyperparameters and are not quantitative summaries of the underlying data [@chari2023specious].
+
+Figure 2.1 contrasts what each method preserves; the accompanying list states what a careful reader should and should not infer.
+
+```{mermaid}
+graph LR
+  X["High-dimensional data X"] --> P["PCA: linear projection<br/>preserves global variance<br/>and approximate Euclidean distance"]
+  X --> T["t-SNE: local affinities via KL<br/>preserves local neighborhoods"]
+  X --> U["UMAP: fuzzy graph cross-entropy<br/>preserves local + some global structure"]
+  P --> PG["read: global variance, loadings"]
+  T --> TG["read: local clusters only"]
+  U --> UG["read: local + rough global"]
+```
+
+: Figure 2.1. What PCA, t-SNE, and UMAP preserve. PCA is a linear projection whose axes are interpretable; t-SNE and UMAP are nonlinear and their layouts are not quantitative coordinates.
+
+The common misinterpretations reduce to one habit: reading a nonlinear layout as if it were a coordinate system. Distance between two t-SNE or UMAP clusters, the size of a cluster, and the emptiness of the space between clusters are all governed by the objective and its hyperparameters rather than by the data alone. PCA is the only one of the three for which the coordinates have a direct linear interpretation, at the cost of assuming the relevant structure is linear.
+
+| Method | Linear? | Objective / quantity preserved | Coordinate interpretability | Main failure mode |
+|:---|:---|:---|:---|:---|
+| PCA | yes | projected variance, global Euclidean structure [@pearson1901lines] | axes are data directions; loadings interpretable | misses curved manifolds |
+| t-SNE | no | local affinities; $D_{\mathrm{KL}}(P\lVert Q)$ [@vandermaaten2008visualizing] | none; layout is not metric | over-read global gaps and cluster sizes [@kobak2019art] |
+| UMAP | no | fuzzy graph cross-entropy [@mcinnes2018umap] | limited; layout is not metric | density and distances not preserved [@chari2023specious] |
+
+: Table 2.2. Dimensionality-reduction methods compared by linearity, preserved quantity, and failure mode.
+
+# Embedding Spaces: Linear Structure, Anisotropy, Alignment, and Analogies
+
+Embeddings are not merely points; their *directions* carry structure. **Linear probing** exploits this: one fits a linear classifier or regressor from embeddings to labels, and the accuracy of the probe measures how linearly accessible the target property is. Formally, given embeddings $\mathbf{z}_i \in \mathbb{R}^d$ and task values $y_i \in \mathbb{R}$, a probe solves
+
+$$ \min_{\mathbf{w} \in \mathbb{R}^d, \; b \in \mathbb{R}} \; \frac{1}{n} \sum_{i=1}^{n} \ell\bigl(\langle \mathbf{w}, \mathbf{z}_i \rangle + b, \; y_i\bigr), $$ {#eq-ch02-probe}
+
+for a per-example loss $\ell$ (squared error for regression, cross-entropy for classification; Appendix A) (@eq-ch02-probe). The resulting probe error measures how linearly accessible the property is, so a property that a single hyperplane can read out is, in a precise sense, already present in the representation; probing establishes linear *accessibility*, not that the representation encodes the property causally.
+
+Two geometric properties complicate this picture. *Anisotropy* is the tendency of trained embeddings to occupy a narrow cone rather than the full sphere, so that random pairs have consistently positive cosine similarity and the effective range of the similarity is compressed [@mu2018all]. Writing $\boldsymbol{\mu} = \frac{1}{n} \sum_i \mathbf{z}_i \in \mathbb{R}^d$ for the mean and $\boldsymbol{\Sigma} \in \mathbb{R}^{d \times d}$ for the covariance of the embedding cloud, *whitening* replaces each vector by
+
+$$ \tilde{\mathbf{z}}_i \;=\; \boldsymbol{\Sigma}^{-1/2} (\mathbf{z}_i - \boldsymbol{\mu}), $$ {#eq-ch02-whitening}
+
+which centers the cloud and equalizes the variance along every direction; centering alone removes most of the mean-shift component of anisotropy, and whitening is the same standardization that underlies the Mahalanobis distance of @eq-ch02-mahalanobis (@eq-ch02-whitening). It requires $\boldsymbol{\Sigma}$ to be invertible, or a regularized inverse otherwise.
+
+*Alignment* addresses the comparison of two embeddings of the same objects, produced by different models, runs, or species. The **orthogonal Procrustes** problem seeks the rotation that best matches one embedding matrix to another. Given matrices $\mathbf{X}, \mathbf{Y} \in \mathbb{R}^{n \times d}$ whose rows correspond to the same objects, one solves
+
+$$ R^\star \;=\; \arg\min_{R^\top R = I} \; \lVert \mathbf{X} R - \mathbf{Y} \rVert_F^2, $$ {#eq-ch02-procrustes}
+
+whose solution is $R^\star = U V^\top$, where $\mathbf{X}^\top \mathbf{Y} = U \Lambda V^\top$ is a singular value decomposition [@gower1975generalized] (@eq-ch02-procrustes). Because $R$ is orthogonal, the alignment preserves distances and inner products within each space while rotating one cloud onto the other, and the residual $\lVert \mathbf{X} R^\star - \mathbf{Y} \rVert_F^2$ quantifies how much structure the two representations share. Generalized Procrustes analysis extends this to more than two configurations by iteratively aligning each to a consensus.
+
+::: {.callout-note}
+## Definition
+
+Two embeddings are **aligned** when a fixed, usually orthogonal, transformation maps one onto the other so that corresponding objects coincide as closely as possible. Orthogonal Procrustes alignment preserves angles and distances and is the standard tool for comparing representations trained independently [@gower1975generalized].
+:::
+
+Finally, embedding spaces support **analogy arithmetic**. Writing $\mathbf{z}_a, \mathbf{z}_b, \mathbf{z}_c \in \mathbb{R}^d$ for the embeddings of three tokens and $\mathcal{Z}$ for the set of candidate embeddings, the answer to "$a$ is to $b$ as $c$ is to $?$" is the candidate nearest to the displacement $\mathbf{z}_b - \mathbf{z}_a + \mathbf{z}_c$,
+
+$$ \mathbf{z}^\star \;=\; \arg\min_{\mathbf{z} \in \mathcal{Z} \setminus \{\mathbf{z}_a, \mathbf{z}_b, \mathbf{z}_c\}} \; \lVert \mathbf{z} - (\mathbf{z}_b - \mathbf{z}_a + \mathbf{z}_c) \rVert_2, $$ {#eq-ch02-analogy}
+
+so that $\mathbf{z}_{\text{king}} - \mathbf{z}_{\text{man}} + \mathbf{z}_{\text{woman}}$ is close to $\mathbf{z}_{\text{queen}}$ in word embeddings, a phenomenon attributed to the same word2vec training objective [@mikolov2013efficient] (@eq-ch02-analogy). The operation works only when relations correspond to roughly parallel displacement vectors — a diagnostic for linear structure, not a guarantee — and its reliability varies with the embedding and the relation. In biology, analogous shifts have been proposed for protein properties and for cross-species alignment, always with the caveat that a successful analogy is evidence of linear organization, not proof of a mechanism.
+
+Taken together, these tools define the vocabulary of the rest of the book. Similarity and distance decide what "close" means; dimensionality reduction decides how to see structure in high dimensions; alignment and analogy arithmetic decide how to compare and manipulate embedding spaces.
+
+::: {.callout-tip}
+## Key Takeaways
+
+- An embedding lives in $\mathbb{R}^d$; inner products measure alignment, norms measure length, and cosine similarity measures direction with magnitude removed.
+- Cosine versus Euclidean distance is a choice about whether magnitude is meaningful; Mahalanobis distance additionally corrects for feature correlation.
+- Edit and alignment distances are non-Euclidean string dissimilarities computed by dynamic programming; they are the biological ground truth that vector metrics approximate [@levenshtein1966binary; @needleman1970general; @smith1981identification].
+- The curse of dimensionality motivates reducing dimension, and the manifold hypothesis explains why reduction can preserve information.
+- PCA preserves global linear structure; t-SNE and UMAP preserve local neighborhoods only, and their layouts must not be read as quantitative coordinates [@vandermaaten2008visualizing; @mcinnes2018umap; @chari2023specious].
+- Anisotropy distorts raw cosine similarities, orthogonal Procrustes aligns embedding spaces while preserving geometry, and analogy arithmetic signals linear structure [@gower1975generalized; @mikolov2013efficient].
+:::
+
+## Further Reading
+
+- Pearson, *On Lines and Planes of Closest Fit to Systems of Points in Space* (1901) — the origin of principal component analysis.
+- Eckart & Young, *The Approximation of One Matrix by Another of Lower Rank* (1936) — the best low-rank approximation theorem behind PCA, https://doi.org/10.1007/BF02288367.
+- Beyer, Goldstein, Ramakrishnan & Shaft, *When Is "Nearest Neighbor" Meaningful?* (1999) — distance concentration in high dimensions, https://doi.org/10.1007/3-540-49257-7_15.
+- van der Maaten & Hinton, *Visualizing Data using t-SNE*, https://jmlr.org/papers/v9/vandermaaten08a.html.
+- McInnes, Healy & Melville, *UMAP: Uniform Manifold Approximation and Projection* (arXiv:1802.03426).
+- Kobak & Berens, *The Art of Using t-SNE for Single-Cell Transcriptomics*, https://doi.org/10.1038/s41467-019-13056-x.
+- Chari & Pachter, *The Specious Art of Single-Cell Genomics*, https://doi.org/10.1371/journal.pcbi.1011288.
+- Mikolov et al., *Efficient Estimation of Word Representations in Vector Space* (arXiv:1301.3781).

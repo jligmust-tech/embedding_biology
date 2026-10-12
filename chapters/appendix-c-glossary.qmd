@@ -2,9 +2,253 @@
 title: "Appendix C — Glossary"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Appendix C*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
-:::
+This glossary defines, in alphabetical order, the central terms used across the
+book. Notation follows [Appendix A](appendix-a-math.qmd); every named method is
+cited to its primary source.
 
-TODO
+## A
+
+**AUPRC.** Area under the precision–recall curve, aggregating precision
+$\mathrm{TP}/(\mathrm{TP}+\mathrm{FP})$ and recall
+$\mathrm{TP}/(\mathrm{TP}+\mathrm{FN})$; preferred to AUROC under class imbalance.
+See Chapter 11, @eq-ch11-auprc [@saito2015precision].
+
+**AUROC.** Area under the receiver-operating-characteristic curve, equal to the
+probability that a random positive is ranked above a random negative; threshold-free
+but optimistic when positives are rare. See Chapter 11.
+
+## B
+
+**Batch effect.** Systematic technical variation between groups of samples
+processed separately (day, donor, chemistry, run) that is confounded with the
+biological signal and must be removed during integration. See Chapter 8
+[@luecken2022benchmarking].
+
+## C
+
+**Calibration (ECE).** The agreement between predicted probabilities and observed
+frequencies, summarised by expected calibration error; deep networks are often
+overconfident. See Chapter 11, @eq-ch11-ece [@guo2017calibration].
+
+**CLIP-style alignment.** Contrastive training of two encoders so that matched
+pairs have high cosine similarity and mismatched pairs low, via an InfoNCE-style
+objective on paired modalities. See Chapter 9, @eq-ch09-clip [@radford2021learning].
+
+**Contextual embedding.** An embedding $f_\theta(x\mid\mathcal{C})$ that depends on
+a token's surrounding context, as opposed to a static (feature) embedding
+$f_\theta(x)$ fixed per token. See Chapter 1, @eq-ch01-contextual.
+
+## D
+
+**D-MPNN.** Directed message passing neural network, which passes messages over
+directed bonds — avoiding the to-and-fro of undirected schemes — before a
+permutation-invariant readout; the backbone of Chemprop. See Chapter 7,
+@eq-ch07-dmpnn [@yang2019analyzing].
+
+**Data leakage.** Contamination of training by information unavailable at
+prediction time, so that validation overstates generalisation; in biology usually
+structural (related entities in both splits). See Chapter 11 [@whalen2022navigating].
+
+## E
+
+**ECFP/Morgan fingerprint.** Extended-connectivity (circular) fingerprint that
+hashes iterated atom environments into a fixed-length binary vector. See Chapter 7,
+@eq-ch07-ecfp [@rogers2010extended].
+
+**ELBO.** Evidence lower bound, a tractable surrogate for the log marginal
+likelihood that trades a reconstruction term against a KL penalty and is maximised
+to train variational autoencoders. See Chapter 3, @eq-ch03-elbo [@kingma2014auto].
+
+**Embedding.** A parameterised map $f_\theta:\mathcal{X}\to\mathbb{R}^{d}$ sending
+biological entities to vectors so that geometric relations — distances, inner
+products, directions — reflect biological relations. See Appendix A and Chapter 1,
+@eq-ch01-embedding.
+
+**Equivariance.** The property that a model commutes with an input transformation,
+$f(RP+\mathbf{1}t^\top)=Rf(P)+\mathbf{1}t^\top$, required for coordinate-valued
+outputs under rotation and translation. See Chapter 6, @eq-ch06-equivariance
+[@satorras2021n].
+
+## F
+
+**Feature hashing.** Mapping high-cardinality discrete features to fixed-width
+vectors by a hash function, giving bounded-dimension encodings for unbounded
+vocabularies such as k-mers. See Chapter 4, @eq-ch04-kmer-hash
+[@weinberger2009featurehashing].
+
+**Foundation model.** A model trained on broad data at scale, usually
+self-supervised, whose representations transfer to many downstream tasks through
+fine-tuning, prompting, or linear probing. See Chapter 13
+[@bommasani2021opportunities].
+
+## G
+
+**GVP.** Geometric vector perceptron, an equivariant layer that processes scalar
+and vector features so that outputs transform correctly under rotation. See
+Chapter 6, @eq-ch06-gvp [@jing2021learning].
+
+## H
+
+**Homology split.** A train/test partition that assigns whole sequence-similarity
+clusters to a single fold, so no test relative appears in training. See Chapter 11,
+@eq-ch11-homology-split [@whalen2022navigating].
+
+**HVG.** Highly variable genes, the subset of genes selected by expression variance
+after normalisation to reduce dimensionality before embedding. See Chapter 8,
+@eq-ch08-hvg.
+
+## I
+
+**InfoNCE.** The contrastive objective that maximises a softmax log-likelihood of a
+positive pair against in-batch negatives; a lower bound on mutual information. See
+Chapter 3, @eq-ch03-infonce [@vandenoord2018representation].
+
+**Integrated gradients.** An attribution method that averages gradients along the
+straight path from a baseline to the input, satisfying sensitivity and completeness.
+See Chapter 12, @eq-ch12-integrated-gradients [@sundararajan2017axiomatic].
+
+**Integration.** Combining embeddings from multiple datasets while removing batch
+variation and preserving biological variation. See Chapter 8
+[@luecken2022benchmarking].
+
+**Invariance.** The property that a model's output is unchanged by an input
+transformation, e.g. invariance to global rotation and translation for scalar
+structure features. See Chapter 6, @eq-ch06-invariance [@satorras2021n].
+
+## K
+
+**k-mer.** A contiguous subsequence of length $k$; a sequence is represented by its
+vector of k-mer counts, the biological analogue of bag-of-words. See Chapter 4,
+@eq-ch04-kmer-profile.
+
+**KL divergence.** A non-symmetric, non-negative measure $D_{\mathrm{KL}}(P\Vert Q)$
+of how far a distribution $Q$ diverges from a reference $P$; central to variational
+inference and t-SNE. See Appendix A, @eq-appa-kl [@kullback1951information].
+
+**Knowledge graph.** A graph of typed entities linked by typed relations whose
+atomic facts are triples $(h,r,t)$, embedded for link prediction. See Chapter 10.
+
+## L
+
+**Linear probe.** A low-capacity classifier (usually logistic regression) trained on
+frozen embeddings to test whether a target is linearly decodable, yielding a lower
+bound on recoverable information. See Chapter 11, @eq-ch11-linear-probe
+[@alain2016understanding].
+
+## M
+
+**MACCS keys.** A fixed set of 166 structurally defined substructure keys forming a
+binary substructure fingerprint. See Chapter 7 [@durant2002reoptimization].
+
+**Masked language modeling.** A self-supervised objective that masks tokens and
+trains the model to reconstruct them from bidirectional context; the BERT-style
+pretraining used by many sequence language models. See Chapter 3
+[@devlin2019bert].
+
+**Message passing.** The graph-neural-network update in which each node aggregates
+transformed messages from its neighbours,
+$\mathbf{h}_i^{(l+1)}=U(\mathbf{h}_i^{(l)},\bigoplus_{j\in\mathcal{N}(i)}M(\cdot))$,
+followed by a permutation-invariant readout. See Chapter 7, @eq-ch07-mpnn and
+Chapter 10, @eq-ch10-mp [@gilmer2017neural].
+
+**Mismatch/spectrum kernel.** String kernels comparing sequences by shared k-mers:
+the spectrum kernel counts exact matches, the mismatch kernel allows up to $m$
+substitutions. See Chapter 4, @eq-ch04-mismatch
+[@leslie2002spectrum; @leslie2004mismatch].
+
+**Mutual information.** The reduction in uncertainty about one variable from
+observing another, $I(X;Y)=H(X)-H(X\mid Y)$; the quantity contrastive objectives
+bound. See Appendix A, @eq-appa-mi [@cover2006elements].
+
+## O
+
+**One-hot encoding.** The indicator vector $e_a$ with a single one at the position
+of category $a$; a baseline sequence encoding that ignores similarity between
+categories. See Chapter 1, @eq-ch01-onehot.
+
+## P
+
+**Permutation invariance.** The requirement that a set-level output be unchanged by
+reordering its elements, $R(\{\mathbf{h}_{\pi(i)}\})=R(\{\mathbf{h}_i\})$, as needed
+for atoms, residues, and graph nodes. See Chapter 6,
+@eq-ch06-permutation-invariance [@gilmer2017neural].
+
+**Profile HMM.** A hidden Markov model built from a multiple sequence alignment that
+scores a sequence against a family's position-specific match, insert, and delete
+states. See Chapter 5 [@eddy2011accelerated].
+
+**Protein language model (PLM).** A model pretrained self-supervised on large
+protein-sequence corpora whose per-residue embeddings transfer to structure and
+function tasks. See Chapter 5 [@rives2021biological].
+
+**PSSM.** Position-specific scoring matrix, an $L\times 20$ matrix giving the
+log-odds score of each amino acid at each position, derived from an alignment or a
+PSI-BLAST profile. See Chapter 5, @eq-ch05-pssm [@altschul1997gapped].
+
+## Q
+
+**QSAR/QSPR.** Quantitative structure–activity (or structure–property) relationship:
+predicting a molecule's activity or property from its representation. See
+Chapters 7 and 14.
+
+## R
+
+**Representation learning.** The automatic discovery of features or latent vectors
+that make downstream tasks easier, replacing hand-crafted descriptors. See
+Chapter 1 [@bengio2013representation].
+
+## S
+
+**Scaling law.** An empirical power-law relating model size, data, and compute to
+loss, used to allocate pretraining resources. See Chapter 13,
+@eq-ch13-scaling-law [@kaplan2020scaling].
+
+**scVI.** A deep generative (variational autoencoder) model of single-cell counts
+that learns a latent cell embedding while correcting for batch. See Chapter 8,
+@eq-ch08-scvi-likelihood [@lopez2018deep].
+
+**SMILES.** A linear text string encoding a molecular graph, used as tokeniser input
+for chemical language models. See Chapter 7 [@weininger1988smiles].
+
+**Static (feature) embedding.** An embedding that assigns one fixed vector to each
+token independent of context. See Chapter 1, @eq-ch01-contextual.
+
+## T
+
+**Tanimoto similarity.** The ratio
+$\langle u,v\rangle/(\lVert u\rVert_1+\lVert v\rVert_1-\langle u,v\rangle)$ between
+binary fingerprints, the standard chemical similarity. See Chapter 7,
+@eq-ch07-tanimoto [@rogers2010extended].
+
+**Tokenization/BPE.** Splitting a sequence into model tokens; byte-pair encoding
+greedily merges frequent substrings into a subword vocabulary, trading vocabulary
+size against sequence length. See Chapter 4 [@sennrich2016neural].
+
+**TM-score.** A length-normalised structural-alignment similarity in $[0,1]$
+measuring how well two folds superimpose. See Chapter 6 [@zhang2005tmalign].
+
+**TransE/RotatE.** Knowledge-graph embedding models scoring a triple $(h,r,t)$ by
+translation ($h+r\approx t$) or by rotation in complex space. See Chapter 10,
+@eq-ch10-transe and @eq-ch10-rotate [@bordes2013translating; @sun2019rotate].
+
+**t-SNE.** A nonlinear dimensionality-reduction method that minimises the KL
+divergence between high- and low-dimensional neighbour distributions; good for
+clusters, unreliable for global distances. See Chapter 2, @eq-ch02-tsne-obj
+[@vandermaaten2008visualizing].
+
+**Trustworthiness.** A rank-based measure of how many neighbour pairs preserved in a
+low-dimensional visualization were also neighbours in the original space. See
+Chapter 12, @eq-ch12-trustworthiness [@kaski2003trustworthiness].
+
+## U
+
+**UMAP.** A manifold-learning method that builds a fuzzy neighbour graph and
+optimises a cross-entropy between high- and low-dimensional graphs; faster than
+t-SNE and preserving more global structure. See Chapter 2, @eq-ch02-umap-obj
+[@mcinnes2018umap].
+
+## Z
+
+**ZINB.** Zero-inflated negative binomial distribution, a count likelihood modelling
+both over-dispersion and an excess of zeros, as used by scVI. See Chapter 8,
+@eq-ch08-zinb [@lopez2018deep].

@@ -2,9 +2,461 @@
 title: "DNA and RNA Sequence Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 4*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+Nucleotide sequences are the most abundant biological sequence data in existence: a
+single human reference genome contains roughly three billion base pairs, and public
+archives hold hundreds of thousands of genomes and transcriptomes. Turning those
+strings of `A`, `C`, `G`, and `T` (or `U` in RNA) into vectors that machine-learning
+models can use is therefore the first practical problem in biological representation
+learning. This chapter follows the arc from hand-designed encodings through
+task-specific convolutional networks to the current generation of genomic language
+models, and it makes explicit the trade-offs — context length, tokenization, and
+symmetry — that determine when each representation is appropriate.
+
+# Classical Encodings of Nucleotide Sequences
+
+Before any learning, a nucleotide sequence must be mapped to a numeric object. The
+classical encodings are simple, fast, and still competitive on small or well-
+characterized problems.
+
+## One-hot and integer encoding
+
+Formally, let $\mathcal{A}=\{\mathrm{A},\mathrm{C},\mathrm{G},\mathrm{T}\}$ be the DNA
+alphabet and let $s=s_1 s_2 \cdots s_L \in \mathcal{A}^{L}$ be a sequence of length $L$;
+for RNA the alphabet is the same size after substituting $\mathrm{U}$ for $\mathrm{T}$.
+Fix an arbitrary ordering $\mathcal{A}=\{a_1,a_2,a_3,a_4\}$. The one-hot encoding is the
+binary matrix $\mathbf{O}\in\{0,1\}^{L\times 4}$ with entries
+
+$$
+O_{i,c} \;=\; \mathbb{1}[\,s_i = a_c\,],
+\qquad i = 1,\dots,L,\quad c = 1,\dots,4.
+$$ {#eq-ch04-onehot}
+
+Every row $\mathbf{o}_i$ has exactly one nonzero entry, so $\sum_c O_{i,c}=1$ and
+$\lVert\mathbf{o}_i\rVert_2=1$: the encoding places each base at a distinct vertex of the
+probability simplex and is a bijection onto the set of one-hot matrices, hence
+information-preserving and requiring no training. Its weaknesses follow from the same
+arithmetic. It is maximally sparse, it treats every position independently, and it is
+*uninformative about base similarity*: for any two distinct one-hot vectors
+$\mathbf{u}\neq\mathbf{v}\in\{\mathbf{e}_1,\dots,\mathbf{e}_4\}$,
+$\lVert\mathbf{u}-\mathbf{v}\rVert_2^{2}=2$, so all pairs of bases sit at the same
+distance. The encoding therefore cannot express the chemical resemblance between the
+purines $\{\mathrm{A},\mathrm{G}\}$ or between the pyrimidines $\{\mathrm{C},\mathrm{T}\}$.
+
+## k-mer counts and the bag-of-words analogy
+
+A more compact alternative borrows the bag-of-words idea from natural language
+processing [@mikolov2013efficient]. A **k-mer** is a contiguous substring of length
+$k$. Writing $\mathcal{A}^{k}$ for the set of all length-$k$ words over the alphabet,
+the exact k-mer count feature map sends a sequence $s\in\mathcal{A}^{L}$ to a vector
+$\boldsymbol{\phi}_k(s)\in\mathbb{N}^{4^{k}}$ defined coordinatewise on
+$u\in\mathcal{A}^{k}$ by
+
+$$
+\phi_k(s)_u \;=\; \sum_{i=1}^{L-k+1} \mathbb{1}[\,s_{i:i+k-1}=u\,],
+\qquad |\mathcal{A}^{k}| = 4^{k},
+$$ {#eq-ch04-kmer-profile}
+
+where $s_{i:i+k-1}$ is the length-$k$ window starting at position $i$, and dividing by
+$L-k+1$ gives the corresponding frequency profile, a point on the simplex. The sum has
+only $L-k+1$ terms and each term increments a single coordinate, so the profile is
+extremely sparse: $\lVert\boldsymbol{\phi}_k(s)\rVert_0 \le L-k+1 \ll 4^{k}$ for
+moderate $k$. With $k = 6$ the vector has $4^{6}=4{,}096$ coordinates while a
+$1{,}000$-bp sequence contributes at most $995$ nonzero entries; with $k = 3$ only
+$64$ coordinates are possible. The choice of $k$ sets a resolution/specificity
+trade-off: short k-mers are shared across many related sequences and generalize well,
+while long k-mers are specific but sparse and increasingly rare in finite datasets, as
+(@eq-ch04-kmer-profile) makes explicit through the fixed $4^{k}$ feature count.
+
+::: {.callout-note}
+## Definition
+
+A **k-mer** is a contiguous subsequence of length $k$ drawn from a sequence alphabet.
+For DNA the number of distinct k-mers is $4^k$; a **k-mer profile** is the vector of
+counts or frequencies of these k-mers in a sequence. k-mer profiles are the canonical
+example of a *feature* (non-contextual) embedding: every occurrence of a k-mer, in any
+position or context, maps to the same entry.
 :::
 
-TODO
+## k-mer hashing
+
+Enumerating all $4^k$ features becomes impractical as $k$ grows, and most k-mers are
+never observed. **Feature hashing** chooses a hash function
+$h:\mathcal{A}^{k}\to\{1,\dots,B\}$ and replaces (@eq-ch04-kmer-profile) by a fixed
+$B$-dimensional sketch
+
+$$
+\psi_B(s)_j \;=\; \sum_{u\in\mathcal{A}^{k}} \mathbb{1}[\,h(u)=j\,]\,\phi_k(s)_u,
+\qquad j = 1,\dots,B,
+$$ {#eq-ch04-kmer-hash}
+
+which is a linear map of $\boldsymbol{\phi}_k(s)$ that pools all coordinates sharing a
+bucket, so the output dimension $B$ in (@eq-ch04-kmer-hash) is independent of $k$.
+The cost is hash collisions.
+If $h$ is uniform, then $\Pr[h(u)=h(u')]=1/B$ for distinct $u,u'$, so the expected number
+of colliding pairs among the $N_{\mathrm{obs}}\le L-k+1$ observed k-mers is
+$\binom{N_{\mathrm{obs}}}{2}/B$, and $B$ must be chosen large enough that this collision
+mass is small relative to $N_{\mathrm{obs}}$. Doubling $B$ halves the expected collision
+mass, which is exactly the memory-versus-information trade-off that makes hashing the
+standard trick for making high-order k-mer models trainable at scale
+[@weinberger2009featurehashing].
+
+## Mismatch and gapped-k-mer kernels
+
+Exact k-mer matching is brittle: a single substitution disrupts every k-mer spanning
+that position. **Mismatch kernels** allow up to $m$ mismatches when comparing k-mers, so
+that nearby sequence variants still receive high similarity
+[@leslie2004mismatch]. They are defined through a relaxed feature map
+
+$$
+\phi^{(k,m)}_u(s) \;=\; \sum_{i=1}^{L-k+1}
+\mathbb{1}\!\left[\,d_{\mathrm{H}}\bigl(s_{i:i+k-1},\,u\bigr)\le m\,\right],
+\qquad u\in\mathcal{A}^{k},
+$$ {#eq-ch04-mismatch}
+
+where $d_{\mathrm{H}}(\cdot,\cdot)$ is the Hamming distance (the number of differing
+coordinates) and $m\ge 0$ is the mismatch budget. The mismatch kernel is the inner
+product of the feature maps of (@eq-ch04-mismatch),
+$\kappa^{(k,m)}(x,y)=\sum_{u\in\mathcal{A}^{k}}\phi^{(k,m)}_u(x)\,\phi^{(k,m)}_u(y)$, so
+it counts, for each k-mer $u$, pairs of k-mer occurrences (one per sequence) that are
+each within Hamming radius $m$ of $u$; a pair of windows therefore contributes only
+when the two windows differ in at most $2m$ positions. Setting $m=0$
+recovers the exact spectrum kernel [@leslie2002spectrum]; allowing $m>0$ makes nearby
+variants similar, because a substitution perturbs at most $k$ of the windows it
+intersects [@leslie2004mismatch]. The number of words within radius $m$ of a fixed
+k-mer is $\sum_{j=0}^{m}\binom{k}{j}3^{j}$, which grows rapidly with $m$, and this is the
+sensitivity-versus-cost knob of the kernel. **Gapped k-mer features** take the
+complementary route and count only the *positions* of matches within a k-mer while
+ignoring which bases occupy the gaps, which improved regulatory-sequence prediction
+relative to exact k-mer support vector machines [@ghandi2014enhanced]. Both are kernels
+or feature maps that can be fed to a support vector machine or a shallow classifier, and
+both remain competitive baselines on small labeled datasets.
+
+# Unsupervised Sequence Vectors: dna2vec and k-mer Embeddings
+
+K-mer profiles inherit the same weakness as one-hot vectors: any two distinct k-mers
+are equidistant, and the dimensionality grows exponentially with $k$
+[@ng2017dna2vec]. **dna2vec** applies the word2vec skip-gram architecture
+[@mikolov2013efficient] to k-mers, treating each sequence as a sentence and each
+overlapping k-mer as a word, and learns a dense vector per k-mer. The resulting space
+has useful algebraic structure: summing dna2vec vectors approximates nucleotides
+concatenation, and the cosine similarity between two k-mer vectors correlates with
+their Needleman–Wunsch alignment score [@ng2017dna2vec].
+
+A sequence-level embedding is then obtained by pooling (summing or averaging) the
+vectors of its constituent k-mers. This is the DNA analogue of averaging word
+embeddings, and it has the same limitation: pooling discards order and context, so the
+representation cannot express long-range regulatory syntax. These unsupervised vectors
+are best understood as a compact, transferable replacement for raw k-mer counts rather
+than as contextual models.
+
+# Supervised CNNs and the Regulatory-Genome Era
+
+The first wave of highly successful nucleotide embeddings came from supervised
+convolutional networks trained on functional genomics assays.
+
+**DeepSEA** [@alipanahi2015predicting] takes a one-hot encoded 1,000-bp sequence and
+applies convolutional filters that behave as learned position-weight matrices, one per
+candidate motif. Stacked convolution and pooling layers then predict, simultaneously,
+the chromatin features (transcription-factor binding, DNase sensitivity, histone
+marks) measured across hundreds of cell types. The trained network doubles as an
+interpretable model: the first-layer filters recover known motifs, and the model
+supports *in silico* mutagenesis to score the effect of individual variants
+[@alipanahi2015predicting].
+
+**Basset** [@kelley2016basset] applies a similar convolutional architecture to
+predicting chromatin accessibility across many cell types, and shows that the learned
+filters correspond to known regulatory motifs, providing a single model that
+generalizes the accessibility code across cell types [@kelley2016basset]. Both models
+established the now-standard recipe — one-hot input, convolutional motif detectors,
+multi-task output — that underlies most regulatory-genome models.
+
+::: {.callout-note}
+## Definition
+
+A **convolutional motif filter** is a learned weight vector of length $k$ (over the
+one-hot alphabet) that is slid across a sequence; its activation is high where the
+local subsequence matches the filter's pattern. In regulatory genomics these filters
+function as learned position-weight matrices, and their first-layer activations are the
+closest thing a CNN has to an explicit embedding of local sequence content.
+:::
+
+Formally, slide a filter $\mathbf{W}_f\in\mathbb{R}^{k\times 4}$ over the one-hot matrix
+$\mathbf{O}$ of (@eq-ch04-onehot). With bias $b_f$ and a pointwise nonlinearity (a
+rectifier, $\mathrm{ReLU}$), filter $f$ produces the activation map of
+(@eq-ch04-cnn-filter):
+
+$$
+H_{j,f} \;=\; \mathrm{ReLU}\!\left(
+\sum_{c=1}^{4}\sum_{r=0}^{k-1} W_{f,r,c}\,O_{j+r,c} \;+\; b_f
+\right),
+\qquad j = 1,\dots,L-k+1,\quad f = 1,\dots,F,
+$$ {#eq-ch04-cnn-filter}
+
+that is, $\mathbf{H}\in\mathbb{R}^{(L-k+1)\times F}$ for $F$ filters. Before the
+nonlinearity the term $\sum_{r,c}W_{f,r,c}\,O_{j+r,c}
+=\langle\mathbf{W}_f,\mathbf{O}_{j:j+k-1}\rangle$ is a position-weight-matrix match
+score against the length-$k$ window $\mathbf{O}_{j:j+k-1}$, which is why first-layer
+filters are interpretable as motifs; stacked convolution and pooling layers then build
+the multi-task output heads described above.
+
+The limitation of this era is that the embedding is *task-specific*: DeepSEA and
+Basset produce representations tuned to their supervised objectives, and their
+intermediate activations do not transfer cleanly to unrelated tasks. Reusable,
+contextual nucleotide representations required self-supervised pretraining.
+
+# Transformer Language Models for DNA
+
+Masked language modeling (MLM), introduced by BERT [@devlin2019bert], trains a model to
+reconstruct randomly hidden tokens from their context and thereby learn contextual
+representations without labels. Transplanted to DNA, MLM produced a family of genomic
+language models that differ chiefly in how they tokenize sequence and how much context
+they can attend to.
+
+A transformer block replaces recurrence with *self-attention*. Given a token sequence
+$t_1,\dots,t_T$ over a vocabulary $\mathcal{V}$, stack the token embeddings
+$\mathbf{e}_{t_j}\in\mathbb{R}^{d}$ into $\mathbf{E}\in\mathbb{R}^{T\times d}$ and form
+queries, keys, and values
+$\mathbf{Q}=\mathbf{E}\mathbf{W}_Q$, $\mathbf{K}=\mathbf{E}\mathbf{W}_K$,
+$\mathbf{V}=\mathbf{E}\mathbf{W}_V$ with learned projections
+$\mathbf{W}_Q,\mathbf{W}_K\in\mathbb{R}^{d\times d_k}$,
+$\mathbf{W}_V\in\mathbb{R}^{d\times d_v}$. The block computes the scaled dot-product
+attention
+
+$$
+\operatorname{Attn}(\mathbf{Q},\mathbf{K},\mathbf{V})
+= \operatorname{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^{\top}}{\sqrt{d_k}}\right)\mathbf{V},
+\qquad
+\operatorname{softmax}(\mathbf{a})_i = \frac{e^{a_i}}{\sum_{j=1}^{T} e^{a_j}}.
+$$ {#eq-ch04-attention}
+
+where $\mathbf{Q}\mathbf{K}^{\top}\in\mathbb{R}^{T\times T}$ is the attention matrix and
+$\mathbf{K},\mathbf{V}$ are the attention key and value matrices, as in
+@eq-appa-attention [@vaswani2017attention]. (@eq-ch04-attention)
+is evaluated independently by several attention heads with their own projections, and
+their outputs are concatenated. Every token attends to every other token, so the cost of
+the block scales as $O(T^{2}d)$. This quadratic dependence is on the number of *tokens*
+$T$, not on the number of bases $L$, which is precisely why tokenization choices set the
+achievable context length.
+
+The pretraining objective minimizes the negative log-likelihood of masked tokens given
+the unmasked ones. Let $\mathcal{M}\subseteq\{1,\dots,T\}$ be a random set of masked
+positions drawn from a masking distribution $p_{\mathrm{mask}}$, and let
+$t_{\overline{\mathcal{M}}}$ denote the surviving tokens. Then the model parameters
+$\theta$ solve
+
+$$
+\mathcal{L}_{\mathrm{MLM}}(\theta)
+= -\,\mathbb{E}_{t\sim\mathcal{D}}\;\mathbb{E}_{\mathcal{M}\sim p_{\mathrm{mask}}}
+\left[\sum_{j\in\mathcal{M}}\log p_\theta\!\left(t_j \mid t_{\overline{\mathcal{M}}}\right)\right],
+$$ {#eq-ch04-mlm-dna}
+
+(@eq-ch04-mlm-dna) is minimized over $\theta$ on the pretraining corpus
+$\mathcal{D}$. Two assumptions are
+implicit: that $p_{\mathrm{mask}}$ — in BERT, positions sampled independently at a fixed
+rate and replaced by a `[MASK]` token — is a faithful proxy for the corruptions
+downstream tasks will present, and that each predictive distribution
+$p_\theta(t_j\mid t_{\overline{\mathcal{M}}})$ is categorical over the vocabulary
+(Appendix A).
+For DNA, $\mathcal{V}$ is a set of k-mers or BPE subwords, not the four-base alphabet.
+
+The object a DNA language model actually exports is the encoder itself. It maps the
+tokenization $t(s)$ of a sequence $s$ to *contextual* per-token embeddings
+$\mathbf{h}_j\in\mathbb{R}^{d}$ from a chosen layer, and a sequence-level vector is
+obtained by pooling,
+
+$$
+f_\theta(s) \;=\; \operatorname{pool}\!\left(\mathbf{h}_1,\dots,\mathbf{h}_T\right)
+\in\mathbb{R}^{d}.
+$$ {#eq-ch04-dna-embed}
+
+where the pool is a mean or a designated summary token. Unlike the static k-mer profile
+of (@eq-ch04-kmer-profile), in which a k-mer receives one vector regardless of
+context, each $\mathbf{h}_j$ depends on the entire observed sequence — the defining
+distinction between feature and contextual embeddings. The token count is set by the
+tokenizer: $T=L$ for single-nucleotide models, $T=L-k+1$ for overlapping k-mers of
+length $k$, $T=\lceil L/k\rceil$ for non-overlapping k-mers, and $T\le L$ for BPE. (@eq-ch04-dna-embed) thus makes the tokenization trade-off explicit: reducing
+$T$ lowers the attention cost $O(T^{2}d)$ but caps resolution at the token size, which
+is why a $512$-token DNABERT window spans only a few hundred base pairs.
+
+**DNABERT** [@ji2021dnabert] tokenizes DNA into overlapping k-mers (with $k \in
+\{3,4,5,6\}$) using the BERT-base architecture, so that a token represents a short
+word rather than a single base, and pretrains on the human reference genome. Choosing
+$k = 6$ gave the best downstream performance in the original study, and the model
+learns embeddings usable for promoter, splice-site, and transcription-factor-binding
+prediction. Because tokens are k-mers, a 512-token input window covers only a few
+hundred base pairs of unique sequence.
+
+**DNABERT-2** [@zhou2024dnabert2] replaces fixed k-mer tokenization with a byte-pair
+encoding (BPE) vocabulary learned from genomes [@sennrich2016neural] and scales
+pretraining to multiple species, improving efficiency and cross-species transfer
+[@zhou2024dnabert2]. The move from fixed k-mers to learned subwords mirrors the shift
+in NLP from word-level to subword models and directly addresses the tokenization
+issue discussed below.
+
+**Nucleotide Transformer** [@dallatorre2025nucleotide] uses a non-overlapping 6-mer
+tokenizer and trains a series of encoder models from tens of millions to billions of
+parameters on human and multi-species genomes, including thousands of genomes spanning
+the tree of life. The larger models reach state-of-the-art performance on benchmark
+tasks such as enhancer and promoter annotation and chromatin accessibility, and the
+work explicitly studies how performance scales with model size and pretraining
+diversity [@dallatorre2025nucleotide].
+
+The k-mer and BPE models above trade context length for token resolution. **HyenaDNA**
+[@nguyen2023hyenadna] instead tokenizes at single-nucleotide resolution and replaces
+quadratic self-attention with the Hyena operator, an implicit long convolution. This
+lets a small model process context windows up to hundreds of thousands of nucleotides,
+enabling tasks such as chromatin and variant-effect prediction that depend on
+megabase-scale context [@nguyen2023hyenadna]. **Evo** [@nguyen2024evo] extends the same
+single-nucleotide, long-context philosophy to a genomic foundation model trained on
+millions of prokaryotic and phage genomes; it generalizes across DNA, RNA, and protein,
+supports zero-shot function prediction, and generates sequences at both molecular and
+genome scale [@nguyen2024evo].
+
+@tbl-dna-models summarizes the trade-offs. Reported figures are drawn from the
+respective primary sources; consult those sources for exact configuration details.
+
+| Model | Tokenizer | Max context | Pretraining corpus | Parameters (reported) |
+|---|---|---|---|---|
+| DNABERT [@ji2021dnabert] | Overlapping k-mers ($k\le6$) | 512 tokens (few hundred bp) | Human reference genome | ~110M (BERT-base) |
+| DNABERT-2 [@zhou2024dnabert2] | BPE (learned subwords) | 512 tokens | Multi-species genomes | ~117M |
+| Nucleotide Transformer [@dallatorre2025nucleotide] | Non-overlapping 6-mers | up to 1,000 tokens | Human and 3,000+ multi-species genomes | 50M–2.5B |
+| HyenaDNA [@nguyen2023hyenadna] | Single nucleotide | up to ~1M nucleotides | Human reference genome | 1.6M–46M |
+| Evo [@nguyen2024evo] | Single nucleotide | ~131k nucleotides (extendable) | Millions of prokaryotic and phage genomes | ~7B |
+
+: Genomic language models and their tokenization/context trade-offs. Parameters and
+context lengths as reported by the primary sources. {#tbl-dna-models}
+
+# RNA-Specific Embeddings
+
+RNA differs from DNA in more than the substitution of uracil for thymine. RNA is
+typically single-stranded, folds into secondary and tertiary structure through
+intramolecular base pairing, and carries functions — catalysis, splicing, translation
+— that DNA does not. A representation that ignores base pairing therefore misses much
+of the signal.
+
+**RNA-FM** [@chen2022rnafm] is a BERT-style model pretrained with masked language
+modeling on tens of millions of unannotated RNA sequences from RNAcentral. Because it
+is trained at single-nucleotide resolution on RNA, its internal representations encode
+structural information: RNA-FM embeddings transfer to secondary-structure prediction,
+and its attention maps recover base-pairing patterns, giving the model an
+interpretable structural readout in addition to its predictive utility
+[@chen2022rnafm]. Structure-aware RNA models go further by incorporating annotated
+base pairs or performing structure-aware pretraining objectives, but RNA-FM established
+that a generic masked-RNA model already learns structure as an emergent property.
+
+The practical lesson is that alphabet and tokenization are not the only design
+choices: an RNA representation should be evaluated on structure-sensitive and
+function-sensitive tasks, not only on sequence-classification benchmarks borrowed from
+DNA.
+
+# Practicalities: Length, Tokenization, and Reverse-Complement Equivariance
+
+Three design decisions dominate the behavior of nucleotide embeddings in practice.
+
+**Sequence length.** Self-attention scales quadratically with sequence length, so
+context length is fundamentally limited. K-mer and BPE tokenizers shrink the token
+count per base but introduce a resolution ceiling; single-nucleotide tokenizers keep
+full resolution but need efficient long-context architectures such as Hyena
+[@nguyen2023hyenadna] to be usable. The correct choice depends on the task: motif-level
+predictions need only a few hundred bases, whereas distal enhancer–promoter
+interactions and variant effects can require megabase context.
+
+**Tokenization.** The three dominant schemes make different trade-offs, illustrated in
+@fig-tokenization. k-mer tokenization yields a fixed, biology-anchored
+vocabulary and never produces out-of-vocabulary tokens, but commits to a single
+resolution and inflates token count. BPE learns variable-length subwords from data
+[@sennrich2016neural; @zhou2024dnabert2], which is more efficient and more portable
+across species but produces tokens with no direct biological meaning. Single-nucleotide
+tokenization is maximally interpretable and resolution-preserving but shifts the burden
+onto the architecture to model long range.
+
+::: {#fig-tokenization}
+```{mermaid}
+flowchart TB
+  S["Sequence:  A C G T A C G T A C G T"]
+  subgraph K["k-mer tokenization (k = 3, sliding)"]
+    direction LR
+    K1["ACG"] --> K2["CGT"] --> K3["GTA"] --> K4["TAC"] --> K5["ACG"]
+  end
+  subgraph B["BPE tokenization (learned merges)"]
+    direction LR
+    B1["ACGT"] --> B2["ACG"] --> B3["TACGT"]
+  end
+  S --> K
+  S --> B
+```
+
+Two tokenization schemes for the same DNA sequence. Fixed k-mer tokenization (top) slides a window of length k, producing overlapping tokens; byte-pair encoding (bottom) greedily merges frequent adjacent symbols into variable-length tokens learned from the corpus.
+:::
+
+::: {.callout-note}
+## Definition
+
+A representation is **reverse-complement equivariant** if encoding the reverse
+complement of a DNA sequence yields the same embedding up to a fixed, invertible
+transformation. Because a DNA strand and its reverse complement carry the same
+biological information, a model that is not reverse-complement equivariant must treat
+them as unrelated inputs, and must be trained with reverse-complement augmentation to
+avoid learning strand-specific artifacts. Convolutional filters and k-mer vocabularies
+have no built-in equivariance; architectures can be made equivariant by construction,
+which is an active area of genomic-model design.
+:::
+
+**Reverse-complement equivariance.** DNA is double-stranded, so a sequence and its
+reverse complement are biologically equivalent. Let
+$\mathrm{rc}:\mathcal{A}^{L}\to\mathcal{A}^{L}$ be the reverse-complement map (reverse
+the sequence and replace each base by its complement). An encoder $E_\theta$ is
+**reverse-complement equivariant** if there is a fixed invertible map $\mathbf{P}$,
+independent of $s$, with
+
+$$
+E_\theta\!\left(\mathrm{rc}(s)\right) \;=\; \mathbf{P}\,E_\theta(s)
+\qquad \text{for all } s\in\mathcal{A}^{L}.
+$$ {#eq-ch04-rc-equiv}
+
+Because $\mathrm{rc}$ is an involution ($\mathrm{rc}\circ\mathrm{rc}=\mathrm{id}$),
+applying (@eq-ch04-rc-equiv) twice forces $\mathbf{P}^{2}=\mathbf{I}$ on the image of
+$E_\theta$, so $\mathbf{P}$ is an involution; both cases below satisfy this.
+
+For a per-position encoder, $\mathbf{P}$ is the reversal permutation, optionally
+composed with the complement map on tokens; for a pooled sequence embedding it is the
+identity. Neither convolutional filters nor learned k-mer vocabularies satisfy
+(@eq-ch04-rc-equiv) without being constrained to, because the reverse complement of
+a motif is a different pattern that the model otherwise has to learn separately.
+Standard convolutional filters, k-mer vocabularies, and off-the-shelf transformer
+encoders are therefore trained on reverse-complement-augmented data, which targets the
+same invariance empirically rather than guaranteeing it, at the cost of using capacity
+to relearn the complement relation. Architectures designed to satisfy (@eq-ch04-rc-equiv) by construction remove that redundancy, which is one of the recurring
+themes in the transition from task-specific CNNs to genomic foundation models.
+
+::: {.callout-tip}
+## Key Takeaways
+
+- Classical encodings — one-hot, k-mer counts, hashing, and mismatch/gapped kernels —
+  are still strong baselines on small labeled datasets, but they discard positional
+  context and scale poorly with $k$.
+- Unsupervised vectors such as dna2vec produce dense, transferable k-mer embeddings,
+  but pooling them discards order and cannot model long-range regulatory syntax.
+- Supervised CNNs (DeepSEA, Basset) learned interpretable motif filters and defined the
+  regulatory-genome era, but their embeddings are task-specific and do not transfer
+  cleanly.
+- Transformer language models (DNABERT, DNABERT-2, Nucleotide Transformer, HyenaDNA,
+  Evo) differ mainly in tokenization and context length: k-mer and BPE tokens trade
+  resolution for reach, while single-nucleotide long-context models preserve resolution
+  at genome scale.
+- RNA-specific models such as RNA-FM show that masked modeling at single-nucleotide
+  resolution on RNA learns base pairing as an emergent property, making
+  structure-sensitive evaluation essential.
+- Reverse-complement equivariance is a first-class design constraint for DNA
+  representations; without it, models must rely on augmentation and remain sensitive to
+  strand orientation.
+:::
+
+## Further Reading
+
+- Ji et al., *DNABERT* — k-mer tokenization with BERT. <https://doi.org/10.1093/bioinformatics/btab083>
+- Zhou et al., *DNABERT-2* — BPE tokenization and multi-species genomes. <https://doi.org/10.48550/arXiv.2306.15006>
+- Dalla-Torre et al., *Nucleotide Transformer* — scaling and benchmarking genomic models. <https://doi.org/10.1038/s41592-024-02523-z>
+- Nguyen et al., *HyenaDNA* — single-nucleotide long-context modeling. <https://arxiv.org/abs/2306.15794>
+- Nguyen et al., *Evo* — genome-scale sequence modeling and design. <https://doi.org/10.1126/science.ado9336>
+- Chen et al., *RNA-FM* — interpretable RNA foundation model. <https://doi.org/10.48550/arXiv.2204.00300>

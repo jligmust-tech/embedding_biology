@@ -2,9 +2,383 @@
 title: "Foundation Models and Emerging Directions"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 13*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+This chapter surveys the current frontier of representation learning in biology. It
+separates three kinds of statement: results that are reported and verifiable in the
+primary literature, ambitions that are stated as programs rather than achieved
+outcomes, and outright speculation about where the field is heading. Whenever the
+text moves from the first category to the others, it says so. The examples span
+nucleotide, protein, structure, single-cell, molecular, and image modalities, and
+each is described only at the level of detail its primary source supports.
+
+## What "Foundation Model" Means in Biology
+
+::: {.callout-note}
+## Definition
+
+A **foundation model** is a model trained on broad data at scale, usually with a
+self-supervised objective, that produces representations or capabilities
+transferable to many downstream tasks through adaptation (fine-tuning, prompting,
+or linear probing) rather than task-specific training from scratch
+[@bommasani2021opportunities]. In this book the term is used more narrowly: a model
+pretrained on a large unlabelled corpus of a single biological modality, whose
+**embeddings** serve as reusable features.
+
 :::
 
-TODO
+The recipe crystallized in natural language processing, where masked-language-model
+pretraining followed by fine-tuning replaced per-task feature engineering
+[@devlin2019bert]. Biology adopted the same pattern because its data have a
+convenient property: unlabelled sequences, structures, and expression matrices are
+abundant, while labels are scarce. A foundation model therefore front-loads the
+expensive learning into an unlabelled pretraining stage and amortizes it across many
+small labeled tasks.
+
+Three properties distinguish a foundation model from the classical embeddings of
+earlier chapters. First, **scale** in parameters and data. Second, **generality**:
+one checkpoint feeds classification, regression, generation, and retrieval. Third,
+**adaptation**: the embedding is consumed by a lightweight head, so the cost of
+entering a new task is small. A model that is large but trained for exactly one task
+is not a foundation model in this sense.
+
+Adaptation is what makes the pretraining cost worth paying, and it can be stated
+formally. Fix the pretrained encoder $f_\theta:\mathcal{X}\to\mathbb{R}^{d}$, mapping
+an entity $e\in\mathcal{X}$ (here a sequence) to its embedding
+$f_\theta(e)=\mathbf{x}\in\mathbb{R}^{d}$, and freeze $\theta$. A linear probe adds
+parameters $\mathbf{w}\in\mathbb{R}^{d}$ and $b\in\mathbb{R}$ and minimizes
+
+$$
+\min_{\mathbf{w},\,b}\ \frac{1}{n}\sum_{i=1}^{n}
+\ell\!\left(\hat y_i,\,y_i\right),
+\qquad
+\hat y_i =
+\begin{cases}
+\sigma\!\left(\mathbf{w}^{\top}\mathbf{x}_i+b\right), & \text{classification},\\[2pt]
+\mathbf{w}^{\top}\mathbf{x}_i+b, & \text{regression},
+\end{cases}
+$$ {#eq-ch13-probe}
+
+over a labelled set $\{(e_i,y_i)\}_{i=1}^{n}$, where $y_i$ is the task label, $\ell$
+is a per-example loss (cross-entropy for classification, squared error for
+regression), and $\sigma$ is the logistic sigmoid applied for the classification
+link (regression uses the identity). Only $d+1$ parameters are fit, which is why the probe is
+the cheapest test of whether a frozen embedding carries task-relevant information;
+for the losses and links used here the objective @eq-ch13-probe is convex, so it has no
+spurious local minima.
+
+The dominant pretraining objective differs by modality because the data differ.
+Nucleotide and amino-acid language models overwhelmingly use masked or denoising
+objectives inherited from BERT [@devlin2019bert], which suit fixed-length sequences
+and yield bidirectional context. Generative models instead use autoregressive
+objectives: ProGen models protein sequences left to right [@madani2023large], and a
+decoder-only architecture can do the same for general protein design
+[@ferruz2022protgpt2], while Evo applies a causal, long-context objective across
+nucleotide and protein tokens [@nguyen2024sequence]. Contrastive objectives, which
+need paired views of the same entity, dominate cross-modal alignment rather than
+single-modality pretraining [@radford2021learning]. The choice is not cosmetic: an
+encoder captures bidirectional evidence for a score, whereas an autoregressive model
+can also sample new sequences, which is why design applications tend to build on the
+latter.
+
+Both objectives are per-token cross-entropies (Appendix A) and differ only in which
+positions condition each prediction. Let $x=(x_1,\dots,x_T)$ be a token sequence
+drawn from an alphabet $\mathcal{V}$, with $x_i\in\mathcal{V}$, and let
+$M\subseteq\{1,\dots,T\}$ be a random set of masked positions. Masked pretraining
+minimizes
+
+$$
+L_{\mathrm{MLM}}(\theta)=-\,\mathbb{E}_{x\sim\mathcal{D}}\,
+\mathbb{E}_{M}\sum_{i\in M}\log p_\theta\!\left(x_i \mid x_{\setminus M}\right)
+$$ {#eq-ch13-mlm}
+
+where $\mathcal{D}$ is the pretraining corpus and $x_{\setminus M}$ is $x$ with the
+tokens in $M$ replaced by a mask symbol; the sum runs over masked positions only, so
+each term is the negative log-likelihood the model assigns to a masked token given
+its visible context. An autoregressive (causal) model instead factorizes the joint
+distribution left to right and minimizes
+
+$$
+L_{\mathrm{AR}}(\theta)=-\,\mathbb{E}_{x\sim\mathcal{D}}\sum_{t=1}^{T}
+\log p_\theta\!\left(x_t \mid x_{<t}\right),
+$$ {#eq-ch13-ar}
+
+where $x_{<t}=(x_1,\dots,x_{t-1})$. The masked objective @eq-ch13-mlm lets every position
+depend on both directions and is preferred when the representation feeds a scoring
+head, whereas the causal objective @eq-ch13-ar additionally defines a normalized
+distribution over sequences, which is what allows an autoregressive model to sample
+novel sequences [@madani2023large; @ferruz2022protgpt2].
+
+## Scaling Laws and What Transfers
+
+Scaling laws quantify how test loss falls as a power law in model size, dataset
+size, and compute for language models [@kaplan2020scaling], and specify the
+compute-optimal trade-off between the two that later work revised toward
+data-heavy training [@hoffmann2022training]. These empirical laws are the economic
+argument for pretraining at scale: below the compute budget, larger and more
+data-hungry models buy predictable gains.
+
+To make this precise, let $N$ be the number of non-embedding model parameters, $D$
+the number of training tokens, and $L$ the test loss (per-token cross-entropy, in
+nats). Kaplan et al. reported that this loss falls as a power law in the number of
+non-embedding parameters [@kaplan2020scaling]; adding an irreducible-loss floor
+$L_\infty$, as in Hoffmann et al. [@hoffmann2022training], gives the functional form
+
+$$
+L(N)=L_\infty+\left(\frac{N_c}{N}\right)^{\alpha_N},
+$$ {#eq-ch13-scaling-law}
+
+with $L_\infty\ge 0$ an irreducible loss floor, $N_c>0$ a characteristic parameter
+scale, and $\alpha_N>0$ the scaling exponent. The "power law" name comes from the fit
+used to estimate $\alpha_N$: subtracting the floor and taking logarithms gives
+
+$$
+\log\bigl(L(N)-L_\infty\bigr)=\alpha_N\log N_c-\alpha_N\log N,
+$$ {#eq-ch13-scaling-fit}
+
+so $\alpha_N$ is recovered as the negative slope of a straight-line regression of
+$\log(L-L_\infty)$ on $\log N$ (the fit @eq-ch13-scaling-fit) [@kaplan2020scaling]. The loss therefore falls
+predictably with scale, but the exponent is an empirical constant particular to a
+corpus and architecture: nothing in @eq-ch13-scaling-law forces the value found for
+natural language to hold for a nucleotide or protein corpus.
+
+Training compute enters through the same accounting. For a dense transformer, compute
+is dominated by matrix multiplies, and one forward pass over $D$ tokens with $N$
+parameters costs about $2ND$ floating-point operations, with the backward pass adding
+roughly twice that, so the total training budget is approximately
+
+$$
+C \approx 6ND \quad\text{FLOPs}.
+$$ {#eq-ch13-compute}
+
+Given a fixed budget $C$, the compute-optimal allocation minimizes the loss subject
+to @eq-ch13-compute:
+
+$$
+(N^\star,D^\star)=\operatorname*{arg\,min}_{N,\,D\,:\,6ND\le C} L(N,D).
+$$ {#eq-ch13-compute-optimal}
+
+Hoffmann et al. reported that $N^\star\propto C^{a}$ and $D^\star\propto C^{b}$ with
+$a+b=1$ and $a\approx b\approx 0.5$ — model size and data volume growing in equal
+proportion with compute — revising the earlier Kaplan allocation, which favoured
+larger models relative to data [@kaplan2020scaling; @hoffmann2022training]. Because
+@eq-ch13-scaling-law and @eq-ch13-compute-optimal were fitted to language corpora, using them
+to justify a particular biological model size is an extrapolation, not a guarantee.
+
+Proteins provided the clearest biological analogue. Scaling unsupervised training to
+250 million sequences produced ESM-1b, whose representations expose structure and
+function without supervision [@rives2021biological]. Scaling further to 15 billion
+parameters in ESM-2 was reported to improve structure prediction and variant-effect
+signals and has produced widely reused protein embeddings [@lin2023evolutionary].
+Protein-specific scaling behavior has been reported over several orders of
+magnitude, but the exponents are not guaranteed to match those of natural language.
+Whether language scaling laws transfer quantitatively to nucleotide, single-cell, or
+molecular corpora remains an open empirical question; statements to the contrary
+should be treated with caution.
+
+Two cautions follow. First, lower pretraining loss does not guarantee better
+downstream performance: the relationship between the training objective and an
+arbitrary task is indirect, and gains often saturate for tasks far from pretraining.
+Second, scaling laws estimate loss, not the properties a practitioner cares about —
+calibration, robustness to distribution shift, or behavior on rare families.
+Reported scaling of protein language models therefore motivates larger models but
+does not by itself establish that they are more useful for any specific application.
+
+## Modality-Specific Foundation Models: A Comparison
+
+Every major biological modality now has at least one pretrained sequence or graph
+model. For DNA, DNABERT applied k-mer tokenization and masked language modeling to
+genomic sequence [@ji2021dnabert]; DNABERT-2 replaced k-mers with byte-pair encoding
+and multi-species pretraining [@zhou2024dnabert2]; the Nucleotide Transformer
+trained masked encoders on thousands of human and multi-species genomes for
+regulatory tasks [@dallatorre2024nucleotide]; HyenaDNA used a state-space backbone
+to reach nucleotide-resolution contexts up to very long windows
+[@nguyen2023hyenadna]; and Evo scaled a hybrid architecture to genome length for
+both prediction and design [@nguyen2024sequence].
+
+For proteins, ESM-2 [@lin2023evolutionary] shares the modality with ProtT5
+[@elnaggar2022prottrans] and the original ESM-1b [@rives2021biological]. Protein
+*structure* has its own line of models: AlphaFold2 predicts coordinates from
+multiple sequence alignments [@jumper2021highly], OpenFold retrains it openly to
+study generalization and efficiency [@ahdritz2024openfold], and inverse-folding
+models such as ESM-IF predict sequence from backbone [@hsu2022learning].
+
+Single-cell data produced a distinct family: scBERT applied tokenized gene
+expression with a BERT-style objective [@yang2022scbert], Geneformer pretrained on
+ranked gene tokens for transfer across network-biology tasks
+[@theodoris2023transfer], scGPT generalizes a generative transformer across
+single-cell multi-omics [@cui2024scgpt], and scFoundation scales a masked model to
+tens of millions of cells [@hao2024large]. Molecules have MolFormer, a
+SMILES-based chemical language model [@ross2022large], alongside the supervised
+message-passing baseline Chemprop [@yang2019analyzing]. Pathology contributed
+vision-language models that jointly embed images and text [@lu2024visual].
+
+The pattern across modalities is consistent: a tokenization choice (k-mers, byte-pair
+encoding, single nucleotides, ranked genes, or SMILES atoms), a pretraining objective
+(masked or causal), and an adaptation recipe (linear probe or fine-tune). What differs
+is the inductive bias each modality requires. DNA is double-stranded and
+reverse-complement-symmetric; proteins carry strong evolutionary signal encoded in
+covariation; single-cell matrices are sparse counts with a dominant technical axis
+(library size); molecules have explicit graph structure. Designs that respect the relevant symmetry are motivated by this sample-efficiency
+argument, which is why structure- and symmetry-aware models persist alongside purely
+sequence-based ones [@hsu2022learning; @dauparas2022robust]; the size of the effect is
+task-dependent and is not quantified here.
+
+Table 13.1 summarizes the landscape. Scales are those reported in the cited primary
+source and are given only where the primary source states them.
+
+| Model | Modality | Pretraining objective | Reported scale | Representative use | Source |
+|---|---|---|---|---|---|
+| ESM-2 | Protein sequence | Masked language model | up to 15B params | Structure, variant effects, embeddings | [@lin2023evolutionary] |
+| ESM-1b | Protein sequence | Masked language model | — | General protein embeddings | [@rives2021biological] |
+| ProtT5 | Protein sequence | Span denoising | — | Per-residue embeddings | [@elnaggar2022prottrans] |
+| AlphaFold2 | Structure (MSA) | Supervised structure | — | Structure prediction | [@jumper2021highly] |
+| OpenFold | Structure (MSA) | Supervised (reimplementation) | — | Reproducible structure prediction | [@ahdritz2024openfold] |
+| ESM-IF | Structure | Inverse folding | — | Sequence design from backbone | [@hsu2022learning] |
+| DNABERT-2 | DNA | Masked LM, BPE tokens | 117M params | Multi-species genome tasks | [@zhou2024dnabert2] |
+| Nucleotide Transformer | DNA | Masked language model | up to 2.5B params | Regulatory genomics | [@dallatorre2024nucleotide] |
+| HyenaDNA | DNA | Causal LM (state space) | — | Long-context genome modeling | [@nguyen2023hyenadna] |
+| Evo | DNA + protein | Causal LM (hybrid) | 7B params | Genome-scale prediction and design | [@nguyen2024sequence] |
+| scBERT | scRNA-seq | Masked gene LM | — | Cell-type annotation | [@yang2022scbert] |
+| Geneformer | scRNA-seq | Masked gene LM | — | Network-biology transfer | [@theodoris2023transfer] |
+| scGPT | scRNA-seq multi-omics | Generative masked LM | — | Annotation, perturbation | [@cui2024scgpt] |
+| scFoundation | scRNA-seq | Masked expression model | 100M params | Expression-task transfer | [@hao2024large] |
+| MolFormer | Molecule (SMILES) | Masked LM | — | Property prediction | [@ross2022large] |
+| Chemprop | Molecule (graph) | Supervised message passing | — | QSAR/QSPR | [@yang2019analyzing] |
+| CONCH | Pathology image + text | Vision-language | — | Image–omics tasks | [@lu2024visual] |
+
+Table 13.1: Foundation-model comparison matrix. Empty scale entries indicate that
+the primary source is not cited here for a specific parameter count.
+
+## Multimodal and Generalist Models; the Virtual Cell
+
+Contrastive image-text alignment demonstrated that two modalities can share one
+embedding space in which retrieval and zero-shot classification work
+[@radford2021learning]; pathology vision-language models apply the same idea to
+histology and reports [@lu2024visual]. Within structural biology, the coupling runs
+in both directions: sequence embeddings drive structure prediction
+[@lin2023evolutionary; @jumper2021highly], and backbone-conditioned inverse folding
+maps structure back to sequence [@hsu2022learning]. Sequence–structure alignment of
+this kind is the most mature multimodal case in the book.
+
+The more ambitious target is a **virtual cell**: a model that predicts cellular
+state and its response to perturbation across modalities, contexts, and scales
+[@bunne2024how]. That paper is explicit that this is a research program with
+priorities and open problems, not a solved system. It is important not to read the
+existing single-cell foundation models [@cui2024scgpt; @hao2024large] as already
+constituting a virtual cell. Measured against the definition, they provide reusable
+cell embeddings but do not yet predict arbitrary perturbations across modalities
+with calibrated uncertainty. The distance between current models and the stated
+goal is the honest summary; bridging it is an aspiration, not a reported result. The
+priorities that paper lists — data generation across scales, benchmarks that respect
+biological structure, and calibrated uncertainty — map directly onto the challenge
+table below.
+
+## Agentic and Reasoning Systems over Biological Embeddings
+
+A newer direction uses large language models as controllers that call scientific
+tools, read results, and iterate. An autonomous chemical-research system that
+plans and executes experiments with laboratory hardware demonstrates the pattern in
+a controlled setting [@boiko2023autonomous]. In the embedding-centric view of this
+book, such agents sit one layer above the representations: embeddings supply a
+retrieval and scoring substrate — nearest neighbors in sequence space, candidate
+molecules ranked by a learned property model, structures scored by a folding model
+— and the agent sequences calls to those scorers.
+
+This area is early and should be read as such. Reported agentic results are
+narrow, are often bounded by the tools available to the agent, and inherit every
+evaluation weakness of the underlying embedding models discussed in Chapter 11.
+Claims that agents "do biology" autonomously currently outrun the evidence.
+
+The plausible near-term role is narrower than the headline claim. Agents are useful
+where a decision decomposes into retrievals and scorings that embeddings already
+perform well — proposing candidates, filtering a library, or summarizing a screen —
+and where a human remains responsible for the final call. Genuine autonomy requires
+reliable tools, calibrated confidence, and error recovery, none of which current
+embedding models provide on their own.
+
+## Open Challenges
+
+Five challenges recur across modalities. Table 13.2 states each challenge, the
+concrete evidence, and the open question.
+
+| Challenge | What it is | Evidence | Open question |
+|---|---|---|---|
+| Data curation | Heterogeneous, redundant, and unevenly annotated corpora | Protein and genomic pretraining corpora [@rives2021biological; @dallatorre2024nucleotide] | Provenance and metadata standards for pretraining data |
+| Evaluation | Benchmark overfitting and leakage inflate reported gains | Task benchmarks and integration studies [@rao2019evaluating; @luecken2022benchmarking] | Held-out tests that respect homology and distribution shift |
+| Compute | Pretraining cost, carbon, and access asymmetry | Scaling-law trade-offs [@kaplan2020scaling; @hoffmann2022training] | Efficient domain-specific models that rival general ones |
+| Licensing | Unclear reuse terms for data and for released weights | Foundation-model risk analysis [@bommasani2021opportunities] | Consent-aware licensing for genomes and clinical data |
+| Ethics | Privacy of human genomes; dual-use of design models | Foundation-model risk analysis [@bommasani2021opportunities] | Governance appropriate to generative biology |
+
+Table 13.2: Challenges for biological foundation models.
+
+Evaluation deserves emphasis because it is where foundation models are most often
+oversold. Reported gains on a benchmark can reflect leakage of homologous sequences
+between pretraining and test sets rather than genuine transfer
+[@rao2019evaluating], and single-cell integration quality depends strongly on the
+metric chosen [@luecken2022benchmarking]. A foundation model is only as credible as
+the evaluation that isolates its contribution from these confounds.
+
+Data curation is the least glamorous constraint and arguably the binding one.
+Pretraining corpora are assembled from databases with different annotation
+standards, contain near-duplicate sequences, and carry unknown provenance
+[@rives2021biological; @dallatorre2024nucleotide]; models trained on them inherit
+those defects and can reproduce them at scale. Compute access determines who can
+pretrain: the compute-optimal frontier shifts cost between model size and data
+volume [@hoffmann2022training], and only well-resourced groups can explore it.
+Licensing compounds the problem, because released weights and the data behind them
+often carry terms incompatible with clinical or commercial use, a risk emphasized in
+the foundation-model literature [@bommasani2021opportunities]. Ethical concerns are
+modality-specific: human genomes and clinical records raise privacy questions that
+protein sequences do not, while generative protein and molecule models raise
+dual-use questions.
+
+## Speculative Outlook (Labelled as Speculation)
+
+The remainder of this section is explicitly speculative; it is not supported by the
+cited results and should be read as informed conjecture.
+
+- **Unified biomolecular models.** A single model spanning nucleotide, protein, and
+  small-molecule tokens may emerge as tokenization converges. Speculation: whether
+  one architecture beats well-tuned specialists is unknown, and reported comparisons
+  have tended to favour specialists so far.
+- **Interactive, tool-using models.** Embedding models may be invoked by reasoning
+  agents rather than queried directly by humans. Speculation: the division of labor
+  between learned scorers and external tools is unsettled.
+- **Simulation-adjacent virtual cells.** If perturbation prediction matures, cell
+  models could serve as cheap surrogates for experiments. Speculation: calibration
+  and out-of-distribution reliability are the barriers, not raw accuracy.
+
+None of these should be presented as a current capability. Each is a hypothesis
+about direction, and each could fail to materialize.
+
+::: {.callout-tip}
+## Key Takeaways
+
+- A foundation model is pretrained at scale with self-supervision and adapted to
+  many tasks; in biology it is usually modality-specific [@bommasani2021opportunities].
+- Language scaling laws are empirical and may not transfer quantitatively to
+  biological data; treat cross-domain extrapolation as an open question
+  [@kaplan2020scaling; @hoffmann2022training].
+- Every major modality now has reusable pretrained encoders: ESM-2 for proteins
+  [@lin2023evolutionary], the Nucleotide Transformer and Evo for DNA
+  [@dallatorre2024nucleotide; @nguyen2024sequence], scGPT and scFoundation for
+  single cells [@cui2024scgpt; @hao2024large].
+- The virtual cell is a stated program, not an achieved system [@bunne2024how];
+  current cell models provide embeddings, not calibrated perturbation prediction.
+- Data curation, evaluation leakage, compute access, licensing, and ethics are the
+  binding practical limits, and evaluation is the most frequent source of
+  overstated claims [@rao2019evaluating; @luecken2022benchmarking].
+:::
+
+## Further Reading
+
+- Bommasani et al. (2021), *On the Opportunities and Risks of Foundation Models* —
+  the definitional reference for the term [@bommasani2021opportunities].
+- Dalla-Torre et al. (2024), *Nucleotide Transformer*, Nature Methods,
+  doi:10.1038/s41592-024-02523-z [@dallatorre2024nucleotide].
+- Lin et al. (2023), ESM-2, *Science* [@lin2023evolutionary].
+- Cui et al. (2024), *scGPT*, Nature Methods, doi:10.1038/s41592-024-02201-0
+  [@cui2024scgpt].
+- Bunne et al. (2024), *How to Build the Virtual Cell with Artificial
+  Intelligence*, Cell, doi:10.1016/j.cell.2024.11.015 [@bunne2024how].
+- Boiko et al. (2023), *Autonomous Chemical Research with Large Language Models*,
+  Nature, doi:10.1038/s41586-023-06792-0 [@boiko2023autonomous].

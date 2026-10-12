@@ -2,9 +2,667 @@
 title: "Appendix A — Mathematical Background"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Appendix A*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+This appendix fixes the mathematical notation used throughout the book. It is the
+canonical symbol source: the chapters on mathematical foundations, learning
+objectives, single-cell models, and evaluation all rely on the definitions and
+symbols collected here and do not redefine them. The treatment is deliberately
+compact — it states the definitions and the equations the chapters cite, with
+pointers to primary sources rather than full derivations. Every symbol that
+appears anywhere in the book is defined in the canonical table below; where a
+letter is reused for two different objects, both meanings are listed and the
+surrounding context disambiguates them.
+
+# Notation and Conventions
+
+Throughout, scalars are lowercase italic ($d$, $n$, $k$), vectors are bold
+lowercase ($\mathbf{x}$, $\mathbf{z}$), and matrices are bold uppercase
+($\mathbf{X}$, $\mathbf{W}$). Sets and spaces are calligraphic
+($\mathcal{X}$, $\mathcal{D}$). An element of a vector is $x_i$; the $i$-th row
+of a data matrix is the vector $\mathbf{x}_i$; a matrix entry is $X_{ij}$.
+Transposition is $^\top$, elementwise (Hadamard) product is $\odot$, and the
+$\ell_2$ (Euclidean) norm is written $\lVert\cdot\rVert$ unless a subscript
+indicates otherwise. Expectations are $\mathbb{E}[\cdot]$, variances
+$\operatorname{Var}[\cdot]$, covariances $\operatorname{Cov}[\cdot,\cdot]$, and
+gradients $\nabla$. The symbols $H$, $D_{\mathrm{KL}}$, and $I$ denote entropy,
+Kullback--Leibler divergence, and mutual information respectively. Model
+parameters are collected in $\theta$.
+
+**Typography and overloads.** The book-wide convention is **bold for vectors and
+matrices** everywhere: a vector is $\mathbf{x}$ and a matrix is $\mathbf{X}$;
+scalars are italic lowercase ($d$, $n$, $k$), and sets and spaces are calligraphic
+($\mathcal{X}$, $\mathcal{D}$). No chapter redefines a canonical symbol; the small
+number of letters that do carry more than one meaning are listed below, and the
+surrounding context always resolves which is meant:
+
+- $d$: the embedding (latent) dimension, $\mathbf{z}\in\mathbb{R}^{d}$ (this
+  appendix, Chapters 8, 13--14); also the ambient / feature dimension of an
+  object, $x\in\mathbb{R}^{d}$ (Chapters 1--3), which coincides with the embedding
+  dimension when no compression is applied. The lowercase distance functions
+  $d_2$, $d_M$, $d_{\cos}$ (this appendix) and the component dimensions $d_k$
+  (attention key), $d_l$ (layer), $d_e$ (edge) are fixed by their subscripts.
+  The truncation order in a top-$k$ construction is $k$, never a distance.
+- $D$: a distance function / metric $D(\cdot,\cdot)$ (Chapters 1--2); the graph
+  degree matrix $D_{ii}=\sum_j W_{ij}$ (Chapter 3); the pairwise distance matrix
+  $D_{ij}=\lVert \mathbf{x}_i-\mathbf{x}_j\rVert_2$ (Chapter 6); a number of hash
+  buckets (Chapter 4); and a number of training tokens (Chapter 13). A data set is
+  the calligraphic $\mathcal{D}$, never $D$, and no bare $d$ is used for a
+  distance.
+- $\Sigma$: a covariance matrix (this appendix, Chapters 2--3, 8). It never denotes
+  summation — sums use the operator $\sum$ — and singular values are the scalars
+  $\sigma_i$, so $\Sigma$, $\sum$, and $\sigma$ do not collide.
+- $V$: the right singular-vector matrix (this appendix); the value matrix in
+  attention, $Q, K, V$ (this appendix, Chapter 10); the vertex set $V$ of a graph
+  $G=(V,E)$ (Chapters 6, 10); and the vector feature channel of a GVP,
+  $\mathbf{V}\in\mathbb{R}^{\nu\times 3}$ (Chapter 6). The surrounding operation —
+  SVD, attention, graph, or geometric layer — fixes which is meant.
+- $C$: a contact map $C_{ij}=\mathbb{1}[D_{ij}<\tau]$ (Chapter 6); the continuity
+  score $C(k)$ (Chapter 12). The covariance matrix is always the single symbol
+  $\Sigma$; $C$ is never a covariance.
+- $L$: the graph Laplacian $L=D-W$ (Chapter 3); a sequence length (Chapter 4); the
+  scaling-law test loss $L(N)$ (Chapter 13, a quoted result). The book's training
+  objective is the calligraphic $\mathcal{L}$ and a per-example loss is $\ell$.
+- $m$: a margin (triplet loss, Chapter 3); a number of allowed mismatches
+  (Chapter 4); an Adam first-moment estimate $m_t$ (this appendix). The number
+  of modalities is the distinct uppercase $M$.
+- $p, q$: probability mass / density functions $p(\cdot), q(\cdot)$ (this
+  appendix); the node2vec return and in-out walk parameters (Chapter 3). The
+  t-SNE affinity distributions are the distinct uppercase $P, Q$, and the
+  variational posterior is $q_\phi(\mathbf{z}\mid\mathbf{x})$.
+- $W$: a projection / weight matrix (Chapters 3, 10); a graph affinity matrix
+  $W_{ij}\ge 0$ (Chapter 3).
+- $g$: the number of genes (Chapter 8); the decoder $g_\theta$ (this appendix);
+  a rigid motion $g\cdot x$ of 3D coordinates (Chapter 6).
+- $\tau$: a temperature (contrastive objectives, Chapters 3, 9); a contact
+  threshold (Chapter 6).
+- $\sigma$: the logistic sigmoid $\sigma(\cdot)$ (Chapters 3, 10); a singular
+  value $\sigma_i$ or a standard deviation (this appendix). It is never a generic
+  activation: the CNN, GVP, and GNN layers of Chapters 4, 6, and 10 write their
+  activation explicitly (ReLU/ELU).
+- $A$: a generic matrix $A\in\mathbb{R}^{m\times n}$ (this appendix) and the graph
+  adjacency matrix $\mathbf{A}$ of Chapter 10 (with
+  $\tilde{\mathbf{A}}=\mathbf{A}+\mathbf{I}$). An alphabet is the calligraphic
+  $\mathcal{A}$ (Chapters 4, 6); the graph affinity matrix of Chapter 3 is
+  written $W$.
+- $R$: a rotation — the orthogonal alignment $\Omega$, also written $R$ (this
+  appendix), and $R\in SO(3)$ (Chapter 6); the population risk $R(\theta)$ with
+  empirical estimate $\hat R$ (this appendix, Chapter 13); and a
+  permutation-invariant readout $R(\cdot)$ (Chapters 6--7).
+- $P$: the high-dimensional affinity distribution of t-SNE (this appendix,
+  Chapter 2); the reverse-complement permutation map $\mathbf{P}$ (Chapter 4); the
+  number of positive examples (Chapter 11). The amino-acid alphabet is the
+  calligraphic $\mathcal{P}$ (Chapter 5).
+- $N$: the number of atoms, residues, or nodes in one structure/graph (this
+  appendix); the number of positive/negative examples (Chapter 11); a
+  non-embedding parameter count (Chapter 13).
+- $M$: the number of modalities (this appendix, Chapters 9, 13). Reused locally
+  for the PSSM log-odds matrix (Chapter 5), a molecule (Chapter 7), the set of
+  masked positions (Chapters 4, 13), and the number of calibration bins
+  (Chapter 11); context fixes which.
+- $k$: a $k$-mer length and the neighbourhood size in a $k$-NN graph (Chapters 4,
+  11); also the truncation order of a top-$k$ construction — the number of PCA
+  components or the Eckart--Young approximation rank (this appendix, Chapters
+  2--3) — which the dimensionality-reduction chapters of Chapters 3 and 10 write
+  as the reduced embedding dimension (a documented local overload of the
+  canonical embedding dimension $d$).
+- $\mathbf{z}_v^{(l)}$ vs $\mathbf{h}_v^{(l)}$: the same object — the node/atom
+  state at layer $l$. Chapter 10 writes $\mathbf{z}_v^{(l)}$; this appendix
+  provides the canonical $\mathbf{h}_v^{(l)}$.
+- $\phi$: variational / encoder parameters or a message function (this appendix,
+  Chapter 10); also the parameters of the Chapter 14 regulatory model $g_\phi$, and
+  a scalar weighting function of Chapter 3. The related symbol $\mathbf{u}$ is a
+  generic vector (this appendix, Chapter 9) and a reference sequence window in
+  Chapter 14.
+
+::: {.callout-note title="Definition"}
+**Embedding.** An *embedding* is a map $f_\theta:\mathcal{X}\to\mathbb{R}^{d}$ from
+a set of biological entities (sequences, structures, molecules, cells, nodes) to
+real-valued vectors, parameterized by $\theta$, such that geometric relations in
+$\mathbb{R}^{d}$ — distances, inner products, directions — are intended to reflect
+biological relations. The image $f_\theta(x)$ is written $\mathbf{z}$, and $d$ is
+the *embedding* (or *latent*) dimension.
 :::
 
-TODO
+When several objects are observed, their feature vectors are stacked into a *data
+matrix* $\mathbf{X}\in\mathbb{R}^{n\times d}$ with one row per object, and
+$\mathbf{z}_i=f_\theta(\mathbf{x}_i)$ denotes the embedding of object $i$.
+@tbl-symbols is the
+canonical notation table for the whole book: every symbol used in the chapters
+resolves here with a stated type or shape.
+
+| Symbol | Meaning | Type / shape |
+|:---|:---|:---|
+| $\mathcal{X}$ | input domain: the set of biological objects | set |
+| $x \in \mathcal{X}$ | one object: sequence, structure, molecule, cell, or node | object |
+| $\mathcal{D}$ | training dataset; also a set of observed pairs in a prediction objective | set / multiset |
+| $n$ | number of examples (rows of the data matrix) | integer |
+| $d$ | embedding (latent) dimension; also the ambient / feature dimension of $x$ (Ch. 1–3) | integer |
+| $k$ | k-mer length; $k$-NN neighbourhood size; top-$k$ truncation (PCA components, Eckart–Young) | integer |
+| $g$ | number of genes (single-cell feature dimension) | integer |
+| $K$ | number of negative samples (contrastive, SGNS); number of classes/keys in a softmax | integer |
+| $r$ | rank of a matrix | integer |
+| $M$ | number of modalities; also a PSSM matrix (Ch. 5), a molecule (Ch. 7), a mask set (Ch. 4, 13), and ECE bins (Ch. 11) | integer / matrix / set |
+| $N$ | number of atoms, residues, or nodes in one structure/graph; also positives/negatives (Ch. 11) and a parameter count (Ch. 13) | integer |
+| $L$ | sequence length (Ch. 4); graph Laplacian $L = D - W$ (Ch. 3); test loss $L(N)$ (Ch. 13) | integer / $n\times n$ matrix / scalar |
+| $i, j, t, l$ | indices over examples, coordinates, steps, and layers | integers |
+| $\mathbf{x}$ ($x$) | feature vector of one object | $\mathbb{R}^d$ |
+| $\mathbf{x}_i$ ($x_i$) | feature vector of the $i$-th object | $\mathbb{R}^d$ |
+| $\mathbf{x}_i \in \mathbb{R}^3$ | Cartesian coordinates of atom/residue $i$ (Ch. 6) | $\mathbb{R}^3$ |
+| $\mathbf{z}$ ($z$) | embedding / latent code, $\mathbf{z} = f_\theta(\mathbf{x})$ | $\mathbb{R}^d$ |
+| $\mathbf{z}_i$ ($z_i$) | embedding of the $i$-th object | $\mathbb{R}^d$ |
+| $\mathbf{z}^{\text{shared}}_i, \mathbf{z}^{(m)}_i$ | shared and modality-private latents (Ch. 9) | $\mathbb{R}^{d}$ each |
+| $\mathbf{u}, \mathbf{v}$ ($u, v$) | generic vectors; paired modality embeddings (Ch. 9); $\mathbf{u}$ also a reference window (Ch. 14) | $\mathbb{R}^d$ |
+| $\mathbf{y}$ ($y$) | target or label | scalar (or $\mathbb{R}^q$) |
+| $\mathbf{q}, \mathbf{k}$ ($q, k$) | query and key vectors (attention, retrieval) | $\mathbb{R}^{d}$ |
+| $\mathbf{h}_v^{(l)}$ ($h_v^{(l)}$) | hidden representation of node/atom $v$ at layer $l$; written $\mathbf{z}_v^{(l)}$ in Ch. 10 | $\mathbb{R}^{d_l}$ |
+| $\mathbf{e}_{ij}$ ($e_{ij}$) | feature vector on edge/bond $(i,j)$ | $\mathbb{R}^{d_e}$ |
+| $\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t$ | knowledge-graph embeddings of head, relation, tail | $\mathbb{R}^d$ |
+| $X$ | data matrix, one row per object | $n\times d$ |
+| $X_{ij}$ | matrix entry at row $i$, column $j$ | scalar |
+| $W$ | projection / weight matrix (PCA loadings, layers); affinity matrix (Ch. 3) | $d\times k$ / $n\times n$ |
+| $W_{ij}$ | affinity weight between $i$ and $j$ | $\mathbb{R}_{\ge 0}$ |
+| $D$ | distance function $D(\cdot,\cdot)$; degree matrix (Ch. 3); distance matrix (Ch. 6); hash buckets (Ch. 4); training tokens (Ch. 13) | function / $n\times n$ / scalar |
+| $Y$ | low-dimensional coordinates / vertex embeddings | $n\times d$ |
+| $C$ | contact map $C_{ij}=\mathbb{1}[D_{ij}<\tau]$ (Ch. 6); continuity $C(k)$ (Ch. 12) | $\{0,1\}^{N\times N}$ / $[0,1]$ |
+| $T(k)$ | trustworthiness of a projection (Ch. 12) | $[0,1]$ |
+| $\Sigma$ | covariance matrix | $d\times d$, $\Sigma \succeq 0$ |
+| $I, I_k$ | identity matrix | $k\times k$ |
+| $U, V$ | left and right singular-vector matrices | $m\times r$, $n\times r$ |
+| $\sigma_i$ | singular value (non-increasing); logistic sigmoid $\sigma(\cdot)$ | scalar |
+| $A$ | generic matrix; adjacency matrix $\mathbf{A}$ (Ch. 10) | $m\times n$ / $N\times N$ |
+| $\Omega$ ($R$) | orthogonal alignment / rotation matrix | $\Omega^\top\Omega = I$ |
+| $R \in SO(3)$ | proper rotation of 3D coordinates (Ch. 6) | $3\times 3$ |
+| $t$ | translation vector (Ch. 6); also an optimization step | $\mathbb{R}^3$ / integer |
+| $\theta$ | model parameters | — |
+| $P, N$ | numbers of positive / negative examples (Ch. 11) | integer |
+| $\phi$ | variational / encoder parameters; message function (Ch. 10); $g_\phi$ regulatory model (Ch. 14) | — |
+| $f_\theta$ | encoder / model map $x \mapsto z$ | $\mathcal{X}\to\mathbb{R}^d$ |
+| $g_\theta$ | decoder map $z \mapsto x$ | $\mathbb{R}^d\to\mathbb{R}^d$ (data space) |
+| $\mathcal{L}$ | total training objective (loss) | scalar |
+| $\ell$ | per-example loss | scalar |
+| $\eta$ | learning rate | $\mathbb{R}_{>0}$ |
+| $\lambda$ | regularization strength (weight decay) | $\mathbb{R}_{\ge 0}$ |
+| $\rho(\theta)$ | regularization penalty function | scalar |
+| $\tau$ | temperature (contrastive) or contact threshold (Ch. 6) | $\mathbb{R}_{>0}$ |
+| $\alpha_{vu}$ | attention weight from $v$ to $u$ (Ch. 10); significance level (Ch. 11) | $[0,1]$ |
+| $\beta_1, \beta_2$ | Adam exponential decay rates for the moments | $[0,1)$ |
+| $m_t, v_t$ | Adam first- and second-moment estimates | same shape as $\theta$ |
+| $\hat m_t, \hat v_t$ | bias-corrected moment estimates | same shape as $\theta$ |
+| $\epsilon$ | Adam numerical-stability constant | $\mathbb{R}_{>0}$ |
+| $\sigma(\cdot)$ | logistic sigmoid function | $[0,1]$ |
+| $\operatorname{softmax}$ | softmax function | simplex |
+| $\bigoplus$ | permutation-invariant aggregation (sum / mean / max) | — |
+| $\odot$ | Hadamard (elementwise) product | — |
+| $\langle\cdot,\cdot\rangle$ | inner product | scalar |
+| $\lVert\cdot\rVert_p$ | $\ell_p$ norm | scalar |
+| $^\top$ | transpose | — |
+| $\nabla_\theta$ | gradient with respect to $\theta$ | same shape as $\theta$ |
+| $p(x), p_\theta(x)$ | probability mass / density of data | $\ge 0$, integrates to 1 |
+| $q_\phi(z\mid x)$ | approximate posterior | density |
+| $p(z)$ | prior over latent variables | density |
+| $P_n$ | negative-sampling noise distribution | probability |
+| $P, Q$ | high- and low-dimensional affinity distributions (t-SNE) | probability |
+| $\mathbb{E}[\cdot]$ | expectation | scalar / vector |
+| $\operatorname{Var}[\cdot], \operatorname{Cov}[\cdot,\cdot]$ | variance, covariance | scalar / matrix |
+| $H(p)$ | Shannon entropy | nats (or bits) |
+| $H(p,q)$ | cross-entropy | nats (or bits) |
+| $D_{\mathrm{KL}}(p\lVert q)$ | Kullback--Leibler divergence | nats, $\ge 0$ |
+| $I(X;Y)$ | mutual information | nats, $\ge 0$ |
+| $s_i = \sum_j X_{ij}$ | library size of cell $i$ (Ch. 8) | integer |
+| $b_i$ | batch or technical covariate of cell $i$ (Ch. 8) | covariate |
+| $c_i, c_{v,r}$ | covariate vector (Ch. 9); relation-specific context coefficient (Ch. 10) | vector / scalar |
+| $\mathbf{x}^{(m)}_i$ | observation of object $i$ in modality $m$ (Ch. 9) | modality-dependent |
+| $G = (V, E)$ | graph with vertex set $V$ and edge set $E \subseteq V\times V$ (Ch. 10) | graph |
+| $\mathcal{N}(v)$ | neighborhood of node $v$; $\mathcal{N}_r(v)$ restricts to relation $r$ (Ch. 10) | set of nodes |
+| $r$ | relation type in a knowledge graph (Ch. 10); also matrix rank (above) | symbol / integer |
+| $f(\cdot)$ | a scalar weighting function (GloVe, Ch. 3); $f_\theta$ is the model map | function |
+| $p, q$ | node2vec return and in-out walk parameters (Ch. 3) | $\mathbb{R}_{>0}$ |
+| $\operatorname{tr}$ | matrix trace | scalar |
+| $R(\theta)$ | population (expected) risk; $\hat R$ its empirical estimate; $R(\cdot)$ also a permutation-invariant readout (Ch. 6–7) | scalar / function |
+
+: Canonical notation table for the book. Every symbol used in the chapters is
+listed with its meaning and type/shape. {#tbl-symbols}
+
+# Linear Algebra
+
+## Vectors, Inner Products, and Norms
+
+The inner product of two vectors of equal length is the fundamental similarity
+measure; it is defined by @eq-appa-inner-product.
+
+$$
+\langle\mathbf{x},\mathbf{y}\rangle
+= \mathbf{x}^{\top}\mathbf{y}
+= \sum_{i=1}^{d} x_i y_i,
+\qquad \mathbf{x},\mathbf{y}\in\mathbb{R}^{d}.
+$$ {#eq-appa-inner-product}
+
+The inner product measures alignment: it is large and positive when the vectors
+point in similar directions and scales with the length of both. Its derived
+quantity, the norm, measures length. For $p\ge 1$ the $\ell_p$ norm and, as the
+special case $p=2$, the Euclidean norm are given by @eq-appa-norm.
+
+$$
+\lVert\mathbf{x}\rVert_p
+= \Big(\sum_{i=1}^{d}\lvert x_i\rvert^{p}\Big)^{1/p},
+\qquad
+\lVert\mathbf{x}\rVert_2 = \sqrt{\langle\mathbf{x},\mathbf{x}\rangle},
+\qquad \mathbf{x}\in\mathbb{R}^{d}.
+$$ {#eq-appa-norm}
+
+In particular $\lVert\mathbf{x}\rVert_1=\sum_i\lvert x_i\rvert$ and
+$\lVert\mathbf{x}\rVert_\infty=\max_i\lvert x_i\rvert$. The $\ell_1$ and $\ell_2$
+norms are the penalties behind lasso- and ridge-style regularization discussed
+below.
+
+::: {.callout-note title="Definition"}
+**Cosine similarity.** For nonzero vectors, the cosine similarity and cosine
+distance are given by @eq-appa-cosine. Cosine similarity equals the inner product of
+the two vectors after projection onto the unit sphere and is therefore invariant
+to their magnitudes.
+
+$$
+\cos(\mathbf{x},\mathbf{y})
+= \frac{\langle\mathbf{x},\mathbf{y}\rangle}
+        {\lVert\mathbf{x}\rVert_2\,\lVert\mathbf{y}\rVert_2}
+\in [-1,1],
+\qquad
+d_{\cos}(\mathbf{x},\mathbf{y}) = 1 - \cos(\mathbf{x},\mathbf{y}).
+$$ {#eq-appa-cosine}
+:::
+
+Cosine similarity is the default comparison for text- and sequence-derived
+embeddings, because embedding magnitude is often an artefact of training rather
+than meaning [@mikolov2013efficient]. The raw inner product is preferable when
+magnitude is informative (for example, frequency-weighted co-occurrence
+representations) [@pennington2014glove].
+
+## Similarity and Distance Metrics
+
+A *metric* $D:\mathbb{R}^{d}\times\mathbb{R}^{d}\to\mathbb{R}_{\ge0}$ satisfies
+non-negativity, symmetry,
+$D(\mathbf{x},\mathbf{y})=0 \Leftrightarrow \mathbf{x}=\mathbf{y}$, and the
+triangle inequality $D(\mathbf{x},\mathbf{z})\le D(\mathbf{x},\mathbf{y})+D(\mathbf{y},\mathbf{z})$.
+Not every quantity used to compare embeddings is a metric, and the distinction
+matters for downstream algorithms (clustering, $k$-NN graphs, and evaluation)
+that assume one. The two vector-space distances used most are the Euclidean
+distance of @eq-appa-euclidean and the Mahalanobis distance of @eq-appa-mahalanobis.
+
+$$
+d_2(\mathbf{x},\mathbf{y})
+= \lVert\mathbf{x}-\mathbf{y}\rVert_2
+= \sqrt{\sum_{i=1}^{d}(x_i-y_i)^{2}}.
+$$ {#eq-appa-euclidean}
+
+$$
+d_M(\mathbf{x},\mathbf{y})
+= \sqrt{(\mathbf{x}-\mathbf{y})^{\top}\boldsymbol{\Sigma}^{-1}(\mathbf{x}-\mathbf{y})},
+\qquad
+\boldsymbol{\Sigma} = \operatorname{Cov}[\mathbf{x}] \in \mathbb{R}^{d\times d},\;
+\boldsymbol{\Sigma}\succ 0.
+$$ {#eq-appa-mahalanobis}
+
+| Name | Definition | Notes |
+|:---|:---|:---|
+| Euclidean ($\ell_2$) | $\lVert\mathbf{x}-\mathbf{y}\rVert_2$ (@eq-appa-euclidean) | metric; scale-sensitive |
+| Squared Euclidean | $\lVert\mathbf{x}-\mathbf{y}\rVert_2^{2}$ | not a metric (triangle inequality fails) |
+| Manhattan ($\ell_1$) | $\sum_i \lvert x_i-y_i\rvert$ | metric; robust to outliers; ignores correlation |
+| Cosine distance | $1-\cos(\mathbf{x},\mathbf{y})$ (@eq-appa-cosine) | angular; ignores magnitude |
+| Mahalanobis | $\sqrt{(\mathbf{x}-\mathbf{y})^{\top}\boldsymbol{\Sigma}^{-1}(\mathbf{x}-\mathbf{y})}$ (@eq-appa-mahalanobis) | metric; $\boldsymbol{\Sigma}$ from data |
+| Edit (Levenshtein) | min insert/delete/substitute edits to transform sequence $x$ into $y$ | metric on strings; not Euclidean |
+| Alignment score | Needleman--Wunsch / Smith--Waterman score | similarity, not a metric |
+
+: Distances and similarities used in the book. {#tbl-metrics}
+
+The Mahalanobis distance rescales axes by the inverse covariance
+$\boldsymbol{\Sigma}^{-1}$, so it is invariant to invertible linear
+transformations of the feature space [@mahalanobis1936generalised]. Edit
+distance [@levenshtein1966binary] and pairwise alignment scores
+[@needleman1970general; @smith1981identification] operate directly on sequences;
+alignment scores are similarities and can be converted to a distance only
+approximately, which is why sequence-similarity analyses rarely feed a strict
+metric method without care.
+
+## Matrices, Rank, and the Singular Value Decomposition
+
+A matrix $A\in\mathbb{R}^{m\times n}$ is a linear map
+$\mathbb{R}^{n}\to\mathbb{R}^{m}$. Its *rank* is the dimension of its column
+space; a matrix of rank $r$ can be written as a sum of $r$ rank-one terms. The
+*singular value decomposition* (SVD) factors any matrix
+$X\in\mathbb{R}^{m\times n}$ of rank $r$ as in @eq-appa-svd, where the columns of $U$
+and $V$ are orthonormal and the singular values are non-increasing and positive.
+
+$$
+X = U\operatorname{diag}(\sigma_1,\dots,\sigma_r)V^{\top},
+\qquad
+U^{\top}U = I_r,\quad V^{\top}V = I_r,
+\qquad
+\sigma_1 \ge \dots \ge \sigma_r > 0.
+$$ {#eq-appa-svd}
+
+The best rank-$k$ approximation of $X$ in Frobenius norm keeps the $k$ largest
+singular values: this is the Eckart--Young theorem, stated in @eq-appa-eckart-young
+[@eckart1936approximation].
+
+$$
+X_k = \sum_{i=1}^{k}\sigma_i \mathbf{u}_i \mathbf{v}_i^{\top}
+= \arg\min_{\operatorname{rank}(Z)\le k} \lVert X - Z\rVert_F,
+\qquad
+\lVert X - X_k\rVert_F^{2} = \sum_{i=k+1}^{r}\sigma_i^{2}.
+$$ {#eq-appa-eckart-young}
+
+Principal component analysis (PCA) is the same construction applied to the
+centered data matrix [@pearson1901lines; @hotelling1933analysis]. Let
+$\mathbf{X}\in\mathbb{R}^{n\times d}$ have rows $\mathbf{x}_i$ with zero mean and
+sample covariance
+$\boldsymbol{\Sigma}=\tfrac{1}{n}\mathbf{X}^{\top}\mathbf{X}$. PCA seeks the
+orthonormal projection $W\in\mathbb{R}^{d\times k}$ that maximizes the projected
+variance, equivalently minimizes the squared reconstruction error, as stated in
+@eq-appa-pca.
+
+$$
+W^{\star}
+= \arg\max_{W^{\top}W = I_k} \operatorname{tr}\!\big(W^{\top}\boldsymbol{\Sigma} W\big)
+= \arg\min_{W^{\top}W = I_k} \frac{1}{n}\sum_{i=1}^{n}
+   \big\lVert \mathbf{x}_i - W W^{\top}\mathbf{x}_i \big\rVert_2^{2},
+\qquad
+Z = \mathbf{X}W.
+$$ {#eq-appa-pca}
+
+The two expressions are equal because the total variance is fixed; the embedding
+of example $i$ is the row $z_i = W^{\top}\mathbf{x}_i$. For uncentered data one
+replaces $\mathbf{x}_i$ by $\mathbf{x}_i-\bar{\mathbf{x}}$ (with
+$\bar{\mathbf{x}}=\tfrac{1}{n}\sum_i\mathbf{x}_i$) throughout, which is the form
+Chapter 3 uses. Modern presentations and numerical algorithms of these
+factorizations are collected by Golub and Van Loan [@golub2013matrix].
+
+## Embedding Alignment
+
+Two embeddings of the same entities learned in different runs or modalities are
+generally related by a rotation and a scaling. Given paired embeddings
+$X, Y \in \mathbb{R}^{n\times d}$ whose rows correspond to the same objects, the
+*orthogonal Procrustes* problem seeks the orthogonal $\Omega$ minimizing
+$\lVert X\Omega - Y\rVert_F^{2}$; its closed-form solution is given in
+@eq-appa-procrustes [@gower1975generalized].
+
+$$
+\Omega^{\star}
+= \arg\min_{\Omega^{\top}\Omega = I} \lVert X\Omega - Y\rVert_F^{2}
+= U V^{\top},
+\qquad
+X^{\top}Y = U\operatorname{diag}(\sigma)V^{\top}.
+$$ {#eq-appa-procrustes}
+
+Because $\Omega$ is orthogonal, the alignment preserves distances and inner
+products within each space while rotating one cloud onto the other; the residual
+after alignment quantifies how much structure the two representations share.
+Generalized Procrustes analysis extends this to more than two configurations by
+iteratively aligning each to a consensus. A related operation is analogy
+arithmetic, in which a relationship is transferred by adding and subtracting
+embedding vectors, e.g.
+$\mathbf{x}_{\text{king}}-\mathbf{x}_{\text{man}}+\mathbf{x}_{\text{woman}}$
+[@mikolov2013distributed].
+
+# Probability and Statistics
+
+## Random Variables, Expectation, and Distributions
+
+A random variable $X$ has a probability mass function $p(x)$ (discrete) or
+density $p(x)$ (continuous). The expectation is
+$\mathbb{E}[X]=\sum_x x\,p(x)$ (or the corresponding integral), the variance is
+$\operatorname{Var}[X]=\mathbb{E}[(X-\mathbb{E}[X])^{2}]$, and for two variables
+the covariance is
+$\operatorname{Cov}[X,Y]=\mathbb{E}[(X-\mathbb{E}[X])(Y-\mathbb{E}[Y])]$.
+Variables are independent when their joint factorizes,
+$p(x,y)=p(x)\,p(y)$. The distributions most relevant to the data in this book are
+summarized below.
+
+| Distribution | Support | Typical use in biology |
+|:---|:---|:---|
+| Gaussian $\mathcal{N}(\mu,\sigma^{2})$ | $\mathbb{R}$ | embeddings, latent codes |
+| Bernoulli | $\{0,1\}$ | binary labels, mutation presence |
+| Categorical (softmax) | $\{1,\dots,K\}$ | token, cell-type, and residue prediction |
+| Poisson | $\{0,1,2,\dots\}$ | read or count data (low mean) |
+| Negative binomial | $\{0,1,2,\dots\}$ | over-dispersed single-cell counts |
+
+: Distributions used in the book. {#tbl-distributions}
+
+## Likelihood, Bayes, and Estimation
+
+Given data $\mathcal{D}=\{x_1,\dots,x_n\}$ and a model $p(\mathcal{D}\mid\theta)$,
+the *log-likelihood* is $\mathcal{L}(\theta)=\sum_{i=1}^{n}\log p(x_i\mid\theta)$.
+The *maximum-likelihood estimate* maximizes $\mathcal{L}$; the *maximum a
+posteriori* (MAP) estimate maximizes $\mathcal{L}(\theta)+\log p(\theta)$, i.e.
+the likelihood plus a prior. Bayes' rule relates the posterior to the likelihood
+and prior, $p(\theta\mid\mathcal{D})\propto p(\mathcal{D}\mid\theta)\,p(\theta)$.
+Under a Gaussian noise model, minimizing squared error is equivalent to
+maximum likelihood, which is why $\ell_2$ objectives recur below.
+
+## Latent-Variable Models
+
+Many embeddings are defined through *latent variables*. A model posits a
+low-dimensional $\mathbf{z}$ that generates the observed $\mathbf{x}$ via
+$p_\theta(\mathbf{x}\mid\mathbf{z})$ and a prior $p(\mathbf{z})$. The marginal
+$p_\theta(\mathbf{x})=\int p_\theta(\mathbf{x}\mid\mathbf{z})\,p(\mathbf{z})\,d\mathbf{z}$
+is generally intractable, so variational methods maximize the *evidence lower
+bound* (ELBO) of @eq-appa-elbo over an approximate posterior $q_\phi$.
+
+$$
+\mathcal{L}_{\text{ELBO}}(\theta,\phi)
+= \mathbb{E}_{q_\phi(\mathbf{z}\mid\mathbf{x})}\!\big[\log p_\theta(\mathbf{x}\mid\mathbf{z})\big]
+- D_{\mathrm{KL}}\!\big(q_\phi(\mathbf{z}\mid\mathbf{x})\,\lVert\,p(\mathbf{z})\big)
+\;\le\; \log p_\theta(\mathbf{x}).
+$$ {#eq-appa-elbo}
+
+The first term rewards accurate reconstruction and the second pulls the
+posterior toward the prior; the bound is tight when
+$q_\phi(\mathbf{z}\mid\mathbf{x})=p_\theta(\mathbf{z}\mid\mathbf{x})$. The
+variational autoencoder makes this objective differentiable with the
+reparameterization trick [@kingma2014auto]; the same construction underlies
+probabilistic single-cell models such as scVI [@lopez2018deep].
+
+# Information Theory
+
+## Entropy and Cross-Entropy
+
+The entropy of a distribution $p$ is a measure of its average uncertainty
+[@shannon1948mathematical]; it is defined in @eq-appa-entropy.
+
+$$
+H(p) = -\sum_x p(x)\log p(x) = \mathbb{E}_{p}\!\big[-\log p(x)\big],
+$$ {#eq-appa-entropy}
+
+measured in *nats* when the logarithm is natural and in *bits* when the base is
+$2$. The joint entropy $H(X,Y)$ and the conditional entropy
+$H(X\mid Y)=H(X,Y)-H(Y)$ extend this to several variables. The *cross-entropy*
+of @eq-appa-cross-entropy measures the cost of encoding data drawn from $p$ using a
+model $q$; it is the standard training loss for classification and language
+modeling, and its minimum over $q$, attained at $q=p$, is $H(p)$.
+
+$$
+H(p,q) = -\sum_x p(x)\log q(x) = H(p) + D_{\mathrm{KL}}(p\,\lVert\,q).
+$$ {#eq-appa-cross-entropy}
+
+## Kullback--Leibler Divergence
+
+The Kullback--Leibler (KL) divergence, @eq-appa-kl, is the expected excess code length
+when $q$ encodes data from $p$ [@kullback1951information].
+
+$$
+D_{\mathrm{KL}}(p\,\lVert\,q) = \sum_x p(x)\log\frac{p(x)}{q(x)} \;\ge\; 0.
+$$ {#eq-appa-kl}
+
+It is non-negative and zero only when $p=q$ (Gibbs' inequality), but it is
+*asymmetric* — $D_{\mathrm{KL}}(p\,\lVert\,q)\neq D_{\mathrm{KL}}(q\,\lVert\,p)$
+in general — so it is not a metric. The identity
+$H(p,q)=H(p)+D_{\mathrm{KL}}(p\,\lVert\,q)$ from @eq-appa-cross-entropy makes the KL
+term in the ELBO of @eq-appa-elbo a regularizer pulling the approximate posterior
+toward the prior.
+
+## Mutual Information
+
+The mutual information between $X$ and $Y$, @eq-appa-mi, is the KL divergence between
+the joint and the product of the marginals; it is zero exactly when the variables
+are independent.
+
+$$
+I(X;Y)
+= \sum_{x,y} p(x,y)\log\frac{p(x,y)}{p(x)\,p(y)}
+= D_{\mathrm{KL}}\!\big(p(x,y)\,\lVert\,p(x)\,p(y)\big) \;\ge\; 0.
+$$ {#eq-appa-mi}
+
+The *information bottleneck* principle formalizes a useful embedding as one that
+preserves information about a target while compressing the input
+[@tishby1999information], a view that motivates several representation-learning
+objectives.
+
+## Contrastive Objectives and InfoNCE
+
+*Contrastive* methods train embeddings by pulling a positive pair together and
+pushing negative pairs apart. The InfoNCE objective, @eq-appa-infonce, treats this as
+classification over a candidate set: for an anchor $\mathbf{x}$ with positive
+$\mathbf{x}^{+}$ and $K$ negatives $\{\mathbf{x}^{-}_j\}$ compared through an
+encoder $f$,
+
+$$
+\mathcal{L}_{\mathrm{InfoNCE}}
+= -\,\mathbb{E}\!\left[
+\log \frac{\exp\!\big(\langle f(\mathbf{x}),f(\mathbf{x}^{+})\rangle/\tau\big)}
+{\exp\!\big(\langle f(\mathbf{x}),f(\mathbf{x}^{+})\rangle/\tau\big)
++ \sum_{j=1}^{K}\exp\!\big(\langle f(\mathbf{x}),f(\mathbf{x}^{-}_j)\rangle/\tau\big)}
+\right],
+$$ {#eq-appa-infonce}
+
+where $\tau>0$ is a temperature controlling the sharpness of the distribution.
+It is a lower bound on the mutual information between the paired views
+[@vandenoord2018representation] and is the workhorse of self-supervised
+biological representation learning; negative sampling makes the objective
+tractable at scale [@mikolov2013distributed], and the same recipe underpins
+SimCLR-style encoders [@chen2020simple].
+
+# Optimization
+
+## Empirical and Regularized Risk
+
+Training selects parameters $\theta$ that minimize an *empirical risk*,
+optionally with a regularizer, as in @eq-appa-risk.
+
+$$
+\hat\theta
+= \arg\min_{\theta}\; R_\lambda(\theta)
+= \frac{1}{n}\sum_{i=1}^{n}\ell\big(f_\theta(\mathbf{x}_i), y_i\big)
++ \lambda\,\rho(\theta),
+$$ {#eq-appa-risk}
+
+where $\ell$ is a per-example *loss*, $\rho(\theta)$ is a penalty such as
+$\lVert\theta\rVert_2^{2}$ (weight decay, a Gaussian prior under MAP estimation),
+and $\lambda\ge 0$ trades fit against complexity [@boyd2004convex]. The loss
+encodes the statistical assumption about the data: squared error corresponds to
+Gaussian noise, cross-entropy to categorical labels, and so on. The principal
+losses used in the book are collected below.
+
+| Loss | Form (up to constants) | Optimizes |
+|:---|:---|:---|
+| Mean squared error | $\lVert f_\theta(\mathbf{x})-y\rVert_2^{2}$ | regression / reconstruction |
+| Binary cross-entropy | $-[y\log\hat y+(1-y)\log(1-\hat y)]$ | binary classification |
+| Cross-entropy (softmax) | $-\log\frac{\exp z_y}{\sum_k\exp z_k}$ (@eq-appa-softmax) | multi-class prediction |
+| Triplet | $\max(0,m+\lVert\mathbf{a}-\mathbf{p}\rVert^{2}-\lVert\mathbf{a}-\mathbf{n}\rVert^{2})$ | metric learning |
+| InfoNCE | see @eq-appa-infonce | contrastive representation learning |
+
+: Objective functions referenced by the chapters. {#tbl-losses}
+
+## Softmax and Attention
+
+The softmax function maps a real vector to a probability simplex and is the
+output layer for categorical and token prediction; it is defined in
+@eq-appa-softmax.
+
+$$
+\operatorname{softmax}(\mathbf{z})_i
+= \frac{\exp(z_i)}{\sum_{j=1}^{K}\exp(z_j)},
+\qquad i = 1,\dots,K.
+$$ {#eq-appa-softmax}
+
+Softmax normalizes similarities into attention weights. Given query, key, and
+value matrices $Q, K, V$, scaled dot-product attention is defined in
+@eq-appa-attention [@vaswani2017attention].
+
+$$
+\operatorname{Attention}(Q,K,V)
+= \operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V,
+$$ {#eq-appa-attention}
+
+where $d_k$ is the key dimension and $\sqrt{d_k}$ keeps the logits from growing
+with dimension. A Transformer stacks attention layers with position-wise
+feed-forward blocks; a single self-attention head is the weighted average above,
+with the weights produced by @eq-appa-softmax.
+
+## Gradients and Backpropagation
+
+For a scalar objective $J(\theta)$, the gradient $\nabla_\theta J$ points in the
+direction of steepest increase, so parameters move opposite to it. When $J$ is a
+composition of differentiable functions, the chain rule gives the gradient with
+respect to every intermediate quantity; *backpropagation* applies the chain rule
+efficiently by reusing partial results, and it is what makes gradient-based
+training of deep networks practical [@rumelhart1986learning].
+
+## Stochastic Gradient Methods
+
+Exact gradients are expensive for large datasets, so *stochastic gradient
+descent* (SGD) estimates the gradient from a random minibatch and updates the
+parameters as in @eq-appa-sgd, where $\eta>0$ is the learning rate and
+$\hat R$ is the minibatch risk [@robbins1951stochastic].
+
+$$
+\theta_{t+1} = \theta_t - \eta\,\nabla_\theta \hat R(\theta_t).
+$$ {#eq-appa-sgd}
+
+Momentum accumulates past gradients to reduce variance, and adaptive methods such
+as Adam rescale each coordinate by running estimates of the first and second
+gradient moments. Writing $g_t=\nabla_\theta\hat R(\theta_t)$, Adam maintains
+$m_t=\beta_1 m_{t-1}+(1-\beta_1)g_t$ and
+$v_t=\beta_2 v_{t-1}+(1-\beta_2)g_t^{2}$, corrects their bias, and applies the
+update in @eq-appa-adam [@kingma2015adam].
+
+$$
+\theta_{t+1}
+= \theta_t - \eta\,\frac{\hat m_t}{\sqrt{\hat v_t}+\epsilon},
+\qquad
+\hat m_t = \frac{m_t}{1-\beta_1^{t}},\quad
+\hat v_t = \frac{v_t}{1-\beta_2^{t}}.
+$$ {#eq-appa-adam}
+
+The default hyperparameters are $\beta_1=0.9$, $\beta_2=0.999$, and
+$\epsilon=10^{-8}$. The learning rate, batch size, and schedule jointly govern
+stability and generalization.
+
+## Regularization and Conditioning
+
+Unconstrained fitting can memorize noise; regularization adds a penalty such as
+$\lambda\lVert\theta\rVert_2^{2}$ in @eq-appa-risk. Whether a loss is *convex*
+determines whether a local optimum is global: convex problems have no spurious
+local minima, whereas deep embedding models are non-convex and are trained by
+local, stochastic methods [@boyd2004convex]. Geometry also matters downstream:
+learned embedding spaces are often *anisotropic* — variance is concentrated in a
+few directions — which affects similarity comparisons and postprocessing
+[@mu2018all], and is the structure that dimensionality-reduction and
+visualization methods must contend with [@vandermaaten2008visualizing;
+@mcinnes2018umap].
+
+# Where to Go Next
+
+## Further Reading
+
+- Cover, T. M. and Thomas, J. A., *Elements of Information Theory*, 2nd ed.
+  [@cover2006elements] — the standard reference for entropy, KL divergence, and
+  mutual information.
+- Boyd, S. and Vandenberghe, L., *Convex Optimization* [@boyd2004convex] — convex
+  sets, functions, and the optimality conditions behind optimizer convergence.
+- Golub, G. H. and Van Loan, C. F., *Matrix Computations*, 4th ed.
+  [@golub2013matrix] — the authoritative treatment of the SVD and related
+  factorizations.
+- Bengio, Y., Courville, A., and Vincent, P., "Representation Learning: A Review
+  and New Perspectives" [@bengio2013representation] — connects the above
+  machinery to learned representations.
+- Tishby, N., Pereira, F. C., and Bialek, W., "The Information Bottleneck
+  Method" [@tishby1999information] — information-theoretic view of what an
+  embedding should preserve.

@@ -2,9 +2,234 @@
 title: "Appendix B — Tools and Datasets Cheat Sheet"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Appendix B*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+This appendix is a quick-reference index of the datasets and software libraries
+used across the book. Each entry pairs a resource with a one-line statement of
+what it is for and a link; where a resource has a citable primary source, the
+name is followed by a citation to that source so the bibliography remains
+self-contained. The lists are not exhaustive — they are the resources that recur
+in the chapters, chosen because they are widely used, actively maintained, and
+documented.
+
+Two cautions apply to everything below. First, all of these resources are
+*versioned*: sequences are added, structures are re-released, annotations are
+revised, and libraries change APIs. A result is reproducible only if the release
+or commit is recorded alongside the citation. Second, the links point to the
+current live resource; when a paper and a database disagree, the database is the
+authority for the data and the paper for the method.
+
+::: {.callout-note title="Definition"}
+**Database, dataset, benchmark, library.** A *database* (UniProt, PDB) is a
+curated, continuously updated store accessed by query. A *dataset* (a specific
+GEO series) is a fixed collection used for a particular study. A *benchmark*
+(TAPE, MoleculeNet) bundles several datasets with standardized tasks and metrics
+so that models can be compared. A *library* (PyTorch, RDKit) is reusable software
+rather than data.
 :::
 
-TODO
+# Datasets
+
+## Protein and Structure Databases
+
+These resources supply the raw material for sequence and structure embeddings:
+reference sequences and annotations, curated domain and fold families, and
+experimentally determined or predicted coordinates. Most are updated on a regular
+schedule, so version or release dates should be recorded when an analysis is
+reported.
+
+| Resource | Purpose | Link |
+|:---|:---|:---|
+| UniProt [@uniprot2023uniprot] | Canonical protein sequences and functional annotation | <https://www.uniprot.org> |
+| UniRef [@suzek2015uniref] | Clustered UniProt sequences for fast similarity search | <https://www.uniprot.org/help/uniref> |
+| PDB [@berman2000protein] | Experimentally determined 3D structures | <https://www.rcsb.org> |
+| Pfam [@mistry2021pfam] | Protein-family profile HMMs and domain annotations | <https://www.ebi.ac.uk/interpro/entry/pfam/> |
+| CATH [@sillitoe2021cath] | Hierarchical classification of protein domains | <https://www.cathdb.info> |
+| AlphaFold DB [@varadi2022alphafold] | Predicted structures for millions of proteins | <https://alphafold.ebi.ac.uk> |
+
+: Protein sequence and structure resources. {#tbl-protein-data}
+
+## Genomics, Expression, and Atlases
+
+Bulk and single-cell expression resources underpin the single-cell and
+multi-omics chapters. They differ in scale (a few tissues vs. whole organisms),
+in assay (RNA-seq, ChIP-seq, ATAC-seq), and in whether raw reads or processed
+matrices are distributed.
+
+| Resource | Purpose | Link |
+|:---|:---|:---|
+| GTEx [@lonsdale2013genotype] | Tissue-specific expression and expression QTLs | <https://gtexportal.org> |
+| GEO [@barrett2013ncbi] | Archive of functional genomics datasets and series | <https://www.ncbi.nlm.nih.gov/geo/> |
+| TCGA [@weinstein2013cancer] | Pan-cancer molecular profiles across tumor types | <https://www.cancer.gov/ccg/research/genome-sequencing/tcga> |
+| ENCODE [@encode2012integrated] | Functional genomic elements and regulatory assays | <https://www.encodeproject.org> |
+| Human Cell Atlas [@regev2017human] | Reference maps of human cell types and tissues | <https://www.humancellatlas.org> |
+| Tabula Sapiens [@tabula2022tabula] | Multi-organ human single-cell transcriptomic atlas | <https://doi.org/10.1126/science.abl4896> |
+
+: Expression and atlas resources. {#tbl-omics-data}
+
+## Chemistry and Bioactivity
+
+Small-molecule embeddings are trained and evaluated against curated bioactivity
+and property data. These resources supply structures, assays, and protein–ligand
+affinities; the benchmark entry bundles several of them into standard splits.
+
+| Resource | Purpose | Link |
+|:---|:---|:---|
+| ChEMBL [@gaulton2012chembl] | Curated bioactivity data for drug-like molecules | <https://www.ebi.ac.uk/chembl/> |
+| PubChem [@kim2023pubchem] | Chemical structures, properties, and bioassays | <https://pubchem.ncbi.nlm.nih.gov> |
+| PDBbind [@liu2015pdbwide] | Protein–ligand binding affinity measurements | <http://www.pdbbind.org.cn> |
+| MoleculeNet [@wu2018moleculenet] | Benchmark datasets for molecular property prediction | <https://moleculenet.org> |
+
+: Chemistry and bioactivity resources. {#tbl-chem-data}
+
+## Networks, Pathways, and Graph Benchmarks
+
+Relational data — protein interactions, pathways, and molecular graphs — is the
+input to the graph-embedding methods. Pathway and interaction databases provide
+the edges; graph benchmarks provide reproducible node-, edge-, and graph-level
+tasks.
+
+| Resource | Purpose | Link |
+|:---|:---|:---|
+| STRING [@szklarczyk2021string] | Protein–protein interaction and association networks | <https://string-db.org> |
+| Reactome [@gillespie2022reactome] | Curated pathway and reaction knowledgebase | <https://reactome.org> |
+| KEGG [@kanehisa2023kegg] | Pathways, genomes, and disease maps | <https://www.genome.jp/kegg/> |
+| OGB [@hu2020open] | Benchmarks for machine learning on graphs | <https://ogb.stanford.edu> |
+| TAPE [@rao2019evaluating] | Benchmark suite for protein transfer learning | <https://github.com/songlab-cal/tape> |
+| BEND [@marin2024bend] | Benchmark for DNA language models on genomic tasks | <https://arxiv.org/abs/2311.12570> |
+
+: Networks, pathways, and benchmark suites. {#tbl-network-data}
+
+# Software Libraries
+
+## Core Machine Learning
+
+These frameworks provide tensors, automatic differentiation, optimizers, and
+pretrained-model tooling. They are the substrate on which the embedding models in
+the book are implemented; the trade-off is typically ecosystem and hardware
+support versus flexibility.
+
+| Library | Purpose | Link |
+|:---|:---|:---|
+| PyTorch [@paszke2019pytorch] | Tensor computation with automatic differentiation | <https://pytorch.org> |
+| Hugging Face Transformers [@wolf2020transformers] | Pretrained transformer models and tokenizers | <https://huggingface.co/docs/transformers> |
+| scikit-learn [@pedregosa2011scikit] | Classical machine learning, PCA, and metrics | <https://scikit-learn.org> |
+| Chemprop [@yang2019analyzing] | Directed message passing for molecular property prediction | <https://chemprop.readthedocs.io> |
+
+: Core machine-learning libraries. {#tbl-ml-libs}
+
+## Graph Learning
+
+Graph neural networks are implemented with dedicated libraries that provide
+message-passing primitives, mini-batching over graphs, and standard datasets.
+They differ mainly in the underlying tensor framework and in their dataset and
+sampling utilities.
+
+| Library | Purpose | Link |
+|:---|:---|:---|
+| PyTorch Geometric [@fey2019fast] | GNN layers and datasets built on PyTorch | <https://pytorch-geometric.readthedocs.io> |
+| Deep Graph Library (DGL) [@wang2019deep] | Graph-centric deep learning across frameworks | <https://www.dgl.ai> |
+
+: Graph-learning libraries. {#tbl-graph-libs}
+
+## Bioinformatics and Chemistry Toolkits
+
+These libraries handle the non-ML parts of a pipeline: file formats, sequence and
+structure algorithms, and cheminformatics descriptors and fingerprints.
+
+| Library | Purpose | Link |
+|:---|:---|:---|
+| Biopython [@cock2009biopython] | Parsers and algorithms for molecular biology data | <https://biopython.org> |
+| HMMER [@eddy2011accelerated] | Profile hidden Markov model sequence search | <http://hmmer.org> |
+| TM-align [@zhang2005tmalign] | Protein structure alignment and TM-score | <https://zhanggroup.org/TM-align/> |
+| RDKit [@rdkit] | Cheminformatics descriptors and fingerprints | <https://www.rdkit.org> |
+| Open Babel [@oboyle2011open] | Chemical file-format conversion and tooling | <https://openbabel.org> |
+
+: Bioinformatics and chemistry toolkits. {#tbl-bio-libs}
+
+## Single-Cell Analysis
+
+Single-cell pipelines combine data structures, preprocessing, probabilistic
+latent-variable models, and visualization. The scverse ecosystem provides the
+shared data format; the remaining libraries build on it.
+
+| Library | Purpose | Link |
+|:---|:---|:---|
+| Scanpy [@wolf2018scanpy] | Scalable preprocessing, clustering, and visualization | <https://scanpy.readthedocs.io> |
+| scvi-tools [@gayoso2022python] | Probabilistic models for single-cell omics | <https://scvi-tools.org> |
+| scverse / AnnData [@virshup2023scverse] | Shared data structures for single-cell omics | <https://scverse.org> |
+
+: Single-cell analysis libraries. {#tbl-sc-libs}
+
+# Using These Resources
+
+Datasets and benchmarks are only as trustworthy as the splits imposed on them.
+For sequence and structure data, a random split that places homologous or
+near-duplicate entries in both training and test sets inflates apparent
+performance; grouped, time-based, or scaffold-based splits are the honest
+alternative. For interaction and knowledge graphs, random edge splits can leak
+information through the graph's complement. The evaluation chapter treats these
+failure modes in detail [@rao2019evaluating; @wu2018moleculenet;
+@hu2020open].
+
+Formally, a supervised evaluation protocol partitions the labeled data into
+disjoint training, validation, and test sets as in @eq-appb-split,
+
+$$
+\mathcal{D} = \mathcal{D}_{\text{train}} \sqcup \mathcal{D}_{\text{val}} \sqcup \mathcal{D}_{\text{test}},
+\qquad
+\mathcal{D}_{a} \cap \mathcal{D}_{b} = \varnothing \;\; (a \neq b),
+$$ {#eq-appb-split}
+
+fits or selects $\theta$ using only $\mathcal{D}_{\text{train}}$ and
+$\mathcal{D}_{\text{val}}$, and estimates performance by the test empirical risk
+of @eq-appb-leakage.
+
+$$
+\hat R_{\text{test}}(\theta) = \frac{1}{|\mathcal{D}_{\text{test}}|}
+\sum_{(\mathbf{x}_i, y_i) \in \mathcal{D}_{\text{test}}}
+\ell\big(f_\theta(\mathbf{x}_i), y_i\big),
+\qquad
+\text{gap}(\theta) = R(\theta) - \hat R_{\text{test}}(\theta),
+$$ {#eq-appb-leakage}
+
+where $R(\theta)$ is the population risk. Leakage is exactly the condition
+$\text{gap}(\theta) > 0$ systematically — the test set shares information with
+the training set that would not be available for genuinely unseen entities — so
+the estimated risk is optimistic and the split, not the model, is the source of
+the error. The notation of @eq-appb-split and @eq-appb-leakage follows Appendix A.
+
+::: {.callout-note title="Definition"}
+**Benchmark leakage.** *Leakage* is any dependence between the training and
+evaluation data that lets a model exploit information it would not have on
+genuinely unseen data. It is a property of the *split*, not of the model, and it
+is the single most common reason a reported embedding performance does not
+transfer.
+:::
+
+When reporting work built on these resources, record: the resource and release,
+the license and any redistribution restrictions, the split strategy, and the
+preprocessing steps (for example, which UniProt release or which GEO series
+accession). Where a database offers a versioned, citable snapshot, cite that
+rather than only the underlying paper, because a paper citation does not pin the
+data.
+
+# Where to Go Next
+
+## Further Reading
+
+- The UniProt, PDB, and Pfam release notes document schema changes between
+  versions; record the release when reporting results [@uniprot2023uniprot;
+  @berman2000protein; @mistry2021pfam].
+- Luecken et al., "Benchmarking Atlas-level Data Integration in Single-cell
+  Genomics" [@luecken2022benchmarking] — how to choose and evaluate integration
+  methods on atlas-scale data.
+- Rao et al., "Evaluating Protein Transfer Learning with TAPE"
+  [@rao2019evaluating] — the design of a reproducible transfer-learning
+  benchmark.
+- Wu et al., "MoleculeNet" [@wu2018moleculenet] — dataset construction and splits
+  for molecular machine learning.
+- Wolf et al., "SCANPY" [@wolf2018scanpy] and Gayoso et al., "scvi-tools"
+  [@gayoso2022python] — end-to-end single-cell analysis and probabilistic
+  modeling workflows.
+- For versioned, citable snapshots of databases, prefer the Zenodo record linked
+  from each project's documentation; citations to the underlying paper alone do
+  not pin the data release.

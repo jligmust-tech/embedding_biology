@@ -2,9 +2,166 @@
 title: "Why Embeddings for Biology?"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 1*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+# The Representation Problem in Biology
+
+Biological measurements do not arrive in the form that machine-learning algorithms consume. A nucleotide sequence is a string over a four-letter alphabet; a protein is a string over twenty letters; a structure is a set of three-dimensional atomic coordinates; a small molecule is a labeled graph; a cell is a vector of thousands of expression counts; a protein–protein interaction map is a graph. Supervised and unsupervised learning methods, by contrast, operate on fixed-length vectors of real numbers and judge solutions through geometric quantities such as distances and inner products. The gap between the two is the *representation problem*, and the object that closes it is the *embedding*. Much of this data is aggregated in shared reference resources — protein sequences in UniProt [@uniprot2021uniprot] and experimentally determined structures in the Protein Data Bank [@berman2000protein] — which supply both training corpora and evaluation ground truth.
+
+::: {.callout-note}
+## Definition
+
+An **embedding** is a map $f : \mathcal{X} \to \mathbb{R}^d$ from objects $x$ in a domain $\mathcal{X}$ — sequences, structures, molecules, cells, or graph nodes — to a fixed and finite-length vector $\mathbf{z} = f(x) \in \mathbb{R}^d$. The vector $\mathbf{z}$ is the *embedding* or *representation* of $x$, and the number $d$ is the *embedding dimension*, chosen by the designer and usually far smaller than the number of raw measurements.
 :::
 
-TODO
+Writing the map with its learned parameters makes the ingredients explicit (@eq-ch01-embedding). For a domain $\mathcal{X}$ and embedding dimension $d$, an embedding is
+
+$$ f_\theta : \mathcal{X} \to \mathbb{R}^d, \qquad \mathbf{z} = f_\theta(x) \in \mathbb{R}^d, $$ {#eq-ch01-embedding}
+
+where $x \in \mathcal{X}$ is an object, $\mathbf{z}$ its embedding, and $\theta$ collects the encoder parameters (the empty set when $f$ is hand-designed). Embedding $n$ objects stacks their vectors into a data matrix $\mathbf{X} \in \mathbb{R}^{n \times d}$ whose $i$-th row is $\mathbf{z}_i = f_\theta(x_i)$, the embedding of object $x_i$.
+
+To say that "similar objects are close" is to relate a notion of similarity on $\mathcal{X}$ to the geometry of $\mathbb{R}^d$. Let $S_{\mathcal{X}} : \mathcal{X} \times \mathcal{X} \to \mathbb{R}$ score similarity between objects and $S : \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$ score similarity between embeddings (for example the cosine similarity of Chapter 2). An embedding is *order-consistent* with a task when it preserves the ranking of similarities,
+
+$$ S_{\mathcal{X}}(x_i, x_j) \ge S_{\mathcal{X}}(x_k, x_l) \;\Longrightarrow\; S(\mathbf{z}_i, \mathbf{z}_j) \ge S(\mathbf{z}_k, \mathbf{z}_l) $$ {#eq-ch01-similarity}
+
+for all objects $x_i, x_j, x_k, x_l \in \mathcal{X}$ (@eq-ch01-similarity). This *similarity-preservation* property, rather than any literal transcription of the input, is what makes an embedding valuable downstream: when $S$ discards magnitude, as cosine does, only directions are compared; when $S$ is a negative Euclidean distance, magnitude is retained. Which notion of "close" is appropriate is a modeling decision, made precise in Chapter 2. The map $f$ may be designed by hand or learned from data, and the modern practice — learning $f$ — is the subject of this book.
+
+Why learned embeddings help can be stated in three ways. First, they *compress*: a $d$-dimensional vector replaces thousands of raw measurements. For a fixed sample of $n$ objects, the variance of a downstream estimator generally grows with the number of free dimensions — the curse of dimensionality of Chapter 2 [@bellman1957dynamic] — so working in an effective dimension $d \ll d_0$ (with $d_0$ the raw feature dimension) trades a controlled approximation error for lower estimation variance; the trade-off is favorable only when the discarded directions carry little task-relevant information, which is exactly the manifold hypothesis that Chapter 2 examines. Second, they *transfer*: a representation pretrained on a large unlabeled corpus supports many tasks, so the scarce labeled data is spent on adaptation rather than on re-learning features from scratch. Third, they supply a *geometry*: distances and directions in the embedding space expose similarity, clusters, and low-dimensional structure that can be measured and probed, as Chapters 11 and 12 describe.
+
+::: {.callout-note}
+## Definition
+
+**Representation learning** is the subfield concerned with *learning* the encoder $f$ from data rather than fixing it in advance [@bengio2013representation]. In its dominant modern form, $f$ is a neural network with parameters $\theta$, trained so that downstream tasks can be solved from $\mathbf{z} = f_\theta(x)$ more easily than from the raw object $x$.
+:::
+
+# From Hand-Crafted Features to Learned Representations
+
+For decades, biology relied on hand-crafted features. A nucleotide could be *one-hot encoded*: for an alphabet $\mathcal{A}$ with $\lvert \mathcal{A}\rvert$ symbols, the encoding of a symbol $a \in \mathcal{A}$ is the indicator vector
+
+$$ \mathbf{e}_a \in \{0,1\}^{\lvert \mathcal{A} \rvert}, \qquad (\mathbf{e}_a)_b = \mathbf{1}[a = b], \qquad b \in \mathcal{A}, $$ {#eq-ch01-onehot}
+
+so that $\lVert \mathbf{e}_a \rVert_2 = 1$ and any two distinct symbols are exactly as far apart, $\lVert \mathbf{e}_a - \mathbf{e}_b \rVert_2 = \sqrt{2}$ for $a \neq b$, with no notion of graded similarity (@eq-ch01-onehot). A sequence could instead be summarized by counts of its short substrings — the $k$-mer spectrum
+
+$$ \boldsymbol{\varphi}_k(s) \in \mathbb{R}^{\lvert \mathcal{A} \rvert^k}, \qquad \boldsymbol{\varphi}_k(s)_\alpha = \bigl\lvert \{\, j : s_{j:j+k-1} = \alpha \,\} \bigr\rvert, $$ {#eq-ch01-kmer}
+
+which counts, for each $k$-mer $\alpha \in \mathcal{A}^k$, the number of length-$k$ windows of a sequence $s$ equal to $\alpha$; it was later formalized as the spectrum kernel [@leslie2002spectrum]. Its dimension $\lvert \mathcal{A} \rvert^k$ grows exponentially in $k$, while a sequence of length $L$ has at most $L - k + 1$ nonzero entries, so the vector is overwhelmingly sparse (@eq-ch01-kmer). A protein residue could be described by physicochemical scales such as the Kyte–Doolittle hydropathy index [@kyte1982simple]; a small molecule could be encoded by fingerprint bit vectors such as ECFP, which record the presence of local substructures [@rogers2010extended]. These representations encode real domain knowledge. They also have recurring weaknesses: $k$-mer count vectors are high-dimensional and sparse (@eq-ch01-kmer); one-hot vectors carry no notion of similarity beyond exact identity, since any two distinct letters are equally far apart (@eq-ch01-onehot); and hand-crafted descriptors cannot adapt when the task changes.
+
+Learned representations invert the relationship. Instead of specifying the features, one specifies an objective and lets the data determine the geometry. The guiding principle is the *distributional hypothesis*: tokens that occur in similar contexts tend to be functionally related [@harris1954distributional]. Its most influential operationalization, word2vec's skip-gram model, assigns every token $w$ in a vocabulary $\mathcal{V}$ a center embedding $\mathbf{z}_w \in \mathbb{R}^d$ and every context token $c$ a context embedding $\tilde{\mathbf{z}}_c \in \mathbb{R}^d$, and maximizes
+
+$$ \mathcal{L}(\theta) \;=\; \sum_{w \in \mathcal{V}} \sum_{c \in \mathcal{C}(w)} \log \frac{\exp\!\bigl(\langle \mathbf{z}_w, \tilde{\mathbf{z}}_c \rangle\bigr)}{\sum_{c' \in \mathcal{V}} \exp\!\bigl(\langle \mathbf{z}_w, \tilde{\mathbf{z}}_{c'} \rangle\bigr)}, $$ {#eq-ch01-distributional}
+
+where $\mathcal{C}(w)$ collects the tokens co-occurring with $w$ inside a context window and $\theta$ collects all embeddings [@mikolov2013efficient]. The normalizer over the full vocabulary is expensive, so practical training replaces it by negative sampling; the effect is unchanged, and tokens with similar context distributions are driven to similar embeddings (@eq-ch01-distributional). The pivotal demonstration came in natural language processing, where word2vec showed that dense, low-dimensional vectors trained only to predict context could capture semantic relationships: vectors for words used in similar contexts become neighbors, and simple vector arithmetic recovers some analogies [@mikolov2013efficient]. The same recipe transfers to biological strings: ProtVec applies the word2vec idea to overlapping amino-acid $3$-mers and obtains fixed-length vectors for protein sequences [@asgari2015continuous], and Mol2vec applies it to molecular substructures [@jaeger2018mol2vec]. Larger models extend the range of tasks a single representation supports: UniRep learns one sequence-based representation that serves several protein-engineering tasks without per-task retraining [@alley2019unified], and protein language models trained on hundreds of millions of sequences expose structural and functional information that was never supplied as a label [@rives2021biological].
+
+The shift is not merely quantitative. Because $f$ is trained, the geometry of the embedding can be shaped for the problem at hand, and one representation can be *pretrained once and reused* across many downstream tasks. This is also why the phrase "foundation model" enters the biological vocabulary [@bommasani2021opportunities]: a single encoder, trained on a large corpus, provides features for tasks its authors never anticipated.
+
+# What Makes Biology Different
+
+Representation learning for biology is not simply representation learning for text, and several properties recur across modalities.
+
+**Sequence and structure are different views of one object.** The same protein can be described by its amino-acid string or by its three-dimensional coordinates, and the two views are related but far from equivalent. Structural information constrains which representations are physically meaningful, which is why geometry-aware encoders are developed separately from sequence encoders. The accuracy of modern structure prediction, exemplified by AlphaFold [@jumper2021highly], has made predicted structures a practical source of structure-based representations rather than a bottleneck.
+
+**Data are high-dimensional, sparse, and noisy.** Single-cell count matrices are mostly zeros; sequence space is combinatorially vast and only sparsely sampled by observed genomes; measurements carry technical noise that is unrelated to the biology under study.
+
+**Batch effects confound signal.** In single-cell and other omics assays, samples processed in different batches differ systematically for technical reasons. Left unaddressed, these differences can dominate real biological variation, so integration methods and their evaluation are a first-class concern [@luecken2022benchmarking].
+
+**Evolution leaves a strong prior.** Homology, conservation, and covariation encode constraints accumulated over deep time. Language-model objectives exploit this signal: models trained only to predict masked residues recover contacts and structure [@rives2021biological]. The same signal is also a hazard, because evolutionary relatedness between training and test sets can inflate apparent performance — a leakage problem treated in Chapter 11.
+
+**Labels are scarce and expensive.** Assays and clinical annotations are costly, so most biological embeddings are trained self-supervised and evaluated with small labeled sets. This asymmetry favors pretraining followed by light adaptation, and it makes evaluation itself a research problem.
+
+**Objects are structured and hierarchical.** Genes belong to families, cells to types, molecules to scaffolds, and networks to nested communities. Flat vector representations must either respect this structure or deliberately discard it, and the choice shapes later chapters.
+
+These properties interact, which is why representation choice and evaluation cannot be separated. A representation that ignores batch effects can cluster a dataset by experiment rather than by biology; one that ignores evolutionary relatedness can appear to generalize when it has memorized homologs shared between training and test sets. Each modality in Part II has its own version of these constraints, and the evaluation methods in Part III exist to detect when a representation has learned the intended signal rather than a confound.
+
+# Types of Embeddings
+
+Embeddings for biology differ along two axes: *granularity* (what the vector describes) and *context dependence* (whether a vector changes with surroundings). A *feature* or *static* embedding assigns one vector per object or token irrespective of context; ECFP fingerprints [@rogers2010extended] and ProtVec sequence vectors [@asgari2015continuous] are examples. A *contextual* embedding assigns a vector that depends on the surrounding input, so the representation of a residue reflects its neighbors — the property that motivated BERT-style masked language modeling [@devlin2019bert] and its genomic descendants such as DNABERT [@ji2021dnabert]. Formally, writing $\mathcal{C}$ for the context of a token $x$, the two families are
+
+$$ \mathbf{z}_{\text{static}}(x) \;=\; f_\theta(x), \qquad \mathbf{z}_{\text{ctx}}(x \mid \mathcal{C}) \;=\; f_\theta(x; \mathcal{C}), $$ {#eq-ch01-contextual}
+
+so that identical tokens in different contexts receive identical or different vectors respectively (@eq-ch01-contextual).
+
+::: {.callout-note}
+## Definition
+
+A **static (feature) embedding** assigns each object or token $x$ a single vector $\mathbf{z}(x)$ independent of context. A **contextual embedding** assigns $\mathbf{z}(x \mid \mathcal{C})$, a vector that depends on the surrounding context $\mathcal{C}$, so that identical tokens in different contexts receive different vectors [@devlin2019bert].
+:::
+
+Two further families cut across this distinction. *Structural* embeddings encode three-dimensional geometry directly, for instance through geometric vector perceptrons [@jing2021learning]. *Joint* or *multimodal* embeddings align two or more modalities in a shared space so that cross-modal similarity is meaningful, the pattern established for images and text by CLIP-style contrastive objectives [@radford2021learning]. Writing $\mathbf{z}^{(1)}_i$ and $\mathbf{z}^{(2)}_i$ for the embeddings of the same entity $i$ in modalities $1$ and $2$, alignment maximizes the agreement of matched pairs over unmatched ones,
+
+$$ \max_{\theta_1, \theta_2} \; \sum_{i=1}^{n} \log \frac{\exp\!\bigl(\langle \mathbf{z}^{(1)}_i, \mathbf{z}^{(2)}_i \rangle / \tau\bigr)}{\sum_{j=1}^{n} \exp\!\bigl(\langle \mathbf{z}^{(1)}_i, \mathbf{z}^{(2)}_j \rangle / \tau\bigr)}, $$ {#eq-ch01-multimodal}
+
+the InfoNCE/CLIP-style contrastive objective with temperature $\tau > 0$ and parameters $\theta_1, \theta_2$ of the two encoders [@radford2021learning] (@eq-ch01-multimodal). Table 1 classifies representative approaches by input modality, and Table 2 fixes the notation used throughout the book.
+
+| Input modality | Raw object | Representative encoder | Embedding granularity | Example method |
+|:---|:---|:---|:---|:---|
+| DNA / RNA sequence | nucleotide string | CNN or transformer | token, then pooled sequence | DNABERT [@ji2021dnabert]; DeepSEA [@alipanahi2015predicting] |
+| Protein sequence | amino-acid string | transformer or recurrent net | residue, then pooled protein | UniRep [@alley2019unified]; ESM-1b [@rives2021biological] |
+| Protein structure | coordinates or residue graph | geometric / graph network | residue or atom | GVP-GNN [@jing2021learning] |
+| Small molecule | labeled graph or SMILES | graph network or transformer | atom, then molecule | MPNN [@gilmer2017neural]; Mol2vec [@jaeger2018mol2vec] |
+| Single cell | expression count vector | variational autoencoder | cell | scVI [@lopez2018deep] |
+| Biological network | graph | random walk or graph network | node (gene, protein) | node2vec [@grover2016node2vec]; GCN [@kipf2017semi] |
+
+: Table 1. Embedding types classified by input modality. The encoder column names a representative architecture family, not a unique choice.
+
+| Symbol | Meaning |
+|:---|:---|
+| $\mathcal{X}$ | input domain (the set of objects) |
+| $x \in \mathcal{X}$ | an object: sequence, structure, molecule, cell, or node |
+| $\mathbf{z} = f_\theta(x) \in \mathbb{R}^d$ | the embedding of $x$ |
+| $d$ | embedding dimension |
+| $\theta$ | learned encoder parameters |
+| $\mathbf{z}_i$ | embedding of the $i$-th object |
+| $\mathbf{X} \in \mathbb{R}^{n \times d}$ | data matrix of embeddings, rows $\mathbf{z}_i$ |
+| $\mathcal{C}$ | context of a token (neighboring tokens) |
+| $D(\cdot,\cdot)$ | a distance (dissimilarity) function |
+| $S(\cdot,\cdot)$ | a similarity function, typically cosine |
+
+: Table 2. Notation used across the book. Chapter 2 defines the metric quantities; Appendix A provides the linear-algebra and probability background.
+
+The taxonomy of biological data that this book covers is summarized in Figure 1.
+
+```{mermaid}
+graph TD
+  B[Biological data]
+  B --> SEQ[Sequences]
+  B --> STR[Structures]
+  B --> MOL[Small molecules]
+  B --> CELL[Cells / omics]
+  B --> NET[Networks]
+  SEQ --> DNA[DNA and RNA<br/>Ch. 4]
+  SEQ --> PROT[Proteins<br/>Ch. 5]
+  STR --> PSTR[Protein structure<br/>Ch. 6]
+  MOL --> CHEM[Molecules<br/>Ch. 7]
+  CELL --> SC[Single cell<br/>Ch. 8]
+  CELL --> MM[Multi-omics<br/>Ch. 9]
+  NET --> GR[Graphs and KGs<br/>Ch. 10]
+```
+
+: Figure 1. A taxonomy of biological data covered in this book, with the chapter that treats each modality.
+
+# A Map of the Book
+
+The book has three parts. **Part I — Foundations** (Chapters 1–3) builds the vocabulary. Chapter 2 develops the mathematics of similarity, distance, manifolds, and dimensionality reduction; Chapter 3 turns from *what* an embedding is to *how* one is learned, covering factorization, shallow prediction objectives, autoencoders, and contrastive learning.
+
+**Part II — Biological Modalities** (Chapters 4–10) treats one modality per chapter: DNA and RNA sequences, protein sequences, protein structures, small molecules, single cells, multi-omics integration, and graphs and knowledge graphs. Each chapter follows the same arc — classical encodings, learned representations, what the representation captures, and when it fails — and each is anchored to the primary literature for the methods it names.
+
+**Part III — Practice** (Chapters 11–14) covers evaluation and the pitfalls of leakage and distribution shift, interpretability and honest visualization, foundation models and open problems, and end-to-end applications. The appendices collect the mathematical background, a tools-and-datasets cheat sheet, and a glossary.
+
+A reader who finishes this chapter can state the representation problem, distinguish hand-crafted from learned features, name the modalities the book covers, and recognize the vocabulary — embedding, encoder, contextual versus static, multimodal — that the remaining chapters assume.
+
+::: {.callout-tip}
+## Key Takeaways
+
+- Biological objects are heterogeneous, high-dimensional, noisy, and structured, while learning algorithms require fixed-length real vectors; an embedding is the map that reconciles the two.
+- Hand-crafted features (one-hot, $k$-mers, physicochemical scales, fingerprints) encode knowledge but are sparse, rigid, and context-free; learned representations adapt the geometry to the data.
+- Biology differs from text in ways that matter: sequence and structure offer two views of one object, labels are scarce, batch effects are strong, evolutionary signal is both useful and a leakage risk.
+- Embeddings can be classified by granularity and by context dependence — static versus contextual — and by modality — sequence, structure, molecule, cell, or network.
+- The book proceeds from foundations (Chapters 1–3) to modalities (4–10) to practice (11–14).
+:::
+
+## Further Reading
+
+- Bengio, Courville & Vincent, *Representation Learning: A Review and New Perspectives* — the canonical statement of why learned features help (arXiv:1206.5538).
+- Mikolov et al., *Efficient Estimation of Word Representations in Vector Space* — the word2vec paper that seeded analogy arithmetic (arXiv:1301.3781).
+- Harris, *Distributional Structure* — the origin of the distributional hypothesis, https://doi.org/10.1080/00437956.1954.11659520.
+- Alley et al., *Unified Rational Protein Engineering with Sequence-based Deep Representation Learning* — UniRep, a reusable protein representation, *Nature Methods* (2019).
+- Rives et al., *Biological Structure and Function Emerge from Scaling Unsupervised Learning* — ESM-1b, https://doi.org/10.1073/pnas.2016239118.
+- Jumper et al., *Highly Accurate Protein Structure Prediction with AlphaFold*, https://doi.org/10.1038/s41586-021-03819-2.

@@ -2,9 +2,170 @@
 title: "Interpretability and Visualization"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 12*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+An embedding is a compression: it discards most of the raw input and keeps a low-dimensional summary that a model can use. Interpreting an embedding means asking two linked questions — what structure the learned space encodes, and how to display that structure without distorting it. Both questions are easy to answer badly. A scatter plot produced by a nonlinear projection can look convincing while being quantitatively meaningless, and an attribution map can look precise while carrying no causal content. This chapter covers visualization methods and their honest use, quantitative measures of how much a projection preserves, probing and what it can and cannot establish, attribution and attention, latent-space arithmetic, and a reporting checklist for embedding figures.
+
+# Visualizing embeddings
+
+::: {.callout-note}
+## Definition
+**Interpretability** is the degree to which a human can understand why a model produced a particular output or predict how it will behave on new inputs [@doshivelez2017towards]. For embeddings, interpretability has two distinct forms: *representation-level* interpretation, which asks what the geometry of the latent space encodes, and *prediction-level* interpretation, which asks which parts of an input drove a specific prediction.
 :::
 
-TODO
+Dimensionality-reduction methods project a high-dimensional embedding to two dimensions for display. They differ in what geometry they try to preserve, and those differences determine what a plot may legitimately be used to claim.
+
+## What each method preserves
+
+**PCA** projects onto the directions of greatest variance and is linear [@pearson1901lines]. It preserves global variance, its axes are interpretable as linear combinations of the original features, and it is deterministic, so two runs give the same picture. Its weakness is that it cannot unfold a curved manifold: if the data lie on a nonlinear surface, PCA flattens it.
+
+***t*-SNE** preserves local neighbourhoods by matching similarities in the high-dimensional and low-dimensional spaces [@vandermaaten2008visualizing]. It reveals clusters well, but the sizes of clusters, the distances between them, and the emptiness of the space between them are artefacts and must not be read as data. The perplexity parameter controls the effective neighbourhood size, and results change with it; guidance on choosing it and on common misreadings is well documented [@kobak2019art; @wattenberg2016how].
+
+**UMAP** builds a fuzzy topological representation of the data and optimises a low-dimensional embedding to match it [@mcinnes2018umap]. It is faster than *t*-SNE on large datasets and often preserves more global structure, but it is still a nonlinear projection: distances are approximate, and the `n_neighbors` and `min_dist` parameters materially change the picture. As with *t*-SNE, a single run should never be presented as the definitive view.
+
+**PHATE** is designed for data with continuous progression — developmental trajectories or state transitions — and preserves transition structure, giving smoother, more informative pictures of branching processes than *t*-SNE on such data [@moon2019visualizing].
+
+A reproducible projection fixes its preprocessing and its random seed:
+
+```python
+import umap
+import numpy as np
+from sklearn.decomposition import PCA
+
+X = np.load("embeddings.npy")               # shape (n_cells, d)
+X50 = PCA(n_components=50, random_state=0).fit_transform(X)
+reducer = umap.UMAP(n_neighbors=30, min_dist=0.1, random_state=0)
+coords = reducer.fit_transform(X50)
+```
+
+Projections are only comparable if the input to them is handled consistently. Embedding dimensions are usually standardised before projection, because distance-based methods such as *t*-SNE and UMAP treat all dimensions as equally important and are otherwise dominated by high-variance coordinates. For high-dimensional single-cell embeddings it is common to reduce first with PCA to a few tens or hundreds of components and to run the nonlinear projection on those components, which denoises the input and speeds up computation; this step changes the result and must be reported [@wolf2018scanpy]. The underlying distance also matters: these methods assume that Euclidean distance is meaningful in the embedding, which is not guaranteed for representations trained with a cosine or contrastive objective. When the metric does not match the training objective, neighbourhoods in the projection can disagree with neighbourhoods under the model's own similarity function.
+
+| Method | Linear | Preserves | Deterministic | Best used for | Main pitfall |
+|---|---|---|---|---|---|
+| PCA | Yes | Global variance | Yes | First look; interpretable axes | Cannot unfold nonlinear manifolds [@pearson1901lines] |
+| *t*-SNE | No | Local neighbourhoods | No | Cluster structure | Cluster sizes and inter-cluster distances are artefacts [@vandermaaten2008visualizing; @kobak2019art] |
+| UMAP | No | Local + some global structure | No | Large datasets; mixed use | Distances and density are approximate [@mcinnes2018umap] |
+| PHATE | No | Transitions and progression | No | Trajectories and branching | Assumes a continuous progression [@moon2019visualizing] |
+
+: Comparison of dimensionality-reduction methods commonly used to visualize biological embeddings.
+
+## Rules for honest visualization
+
+Four rules prevent most misuse. First, state the method, its parameters, and the preprocessing, because every choice changes the picture. Second, treat axis directions and absolute positions as arbitrary in *t*-SNE, UMAP, and PHATE; only relative relationships within a local neighbourhood carry information. Third, do not compare cluster sizes or inter-cluster gaps across methods or runs. Fourth, report a quantitative neighbourhood-preservation score alongside the figure, so that the reader knows how much of the structure survived the projection.
+
+# Neighborhood and local structure
+
+Because nonlinear projections optimise different objectives, the honest question is not "does this plot look nice?" but "how much of the true neighbourhood structure is retained?" Two rank-based criteria answer it [@kaski2003trustworthiness; @lee2009quality]. Let $N_k(i)$ be the $k$ nearest neighbours of point $i$ in the original embedding, $\hat N_k(i)$ its $k$ nearest neighbours in the projection, and let $r(i,j)$ be the rank of point $j$ among the original-space neighbours of $i$ (rank $1$ is nearest). **Trustworthiness** $T(k)$ penalises *false neighbours* — pairs that are close in the projection but far in the original space:
+
+$$
+T(k) \;=\; 1 \;-\; \frac{2}{n\,k\,(2n - 3k - 1)}
+\sum_{i=1}^{n} \sum_{j \in \hat N_k(i) \setminus N_k(i)} \big( r(i,j) - k \big) \in [0, 1].
+$$ {#eq-ch12-trustworthiness}
+
+**Continuity** $C(k)$ is its dual, penalising *missed neighbours* — pairs close in the original space but far in the projection — and uses the projection ranks $\hat r(i,j)$ instead:
+
+$$
+C(k) \;=\; 1 \;-\; \frac{2}{n\,k\,(2n - 3k - 1)}
+\sum_{i=1}^{n} \sum_{j \in N_k(i) \setminus \hat N_k(i)} \big( \hat r(i,j) - k \big) \in [0, 1].
+$$ {#eq-ch12-continuity}
+
+Both scores lie between zero and one, higher is better, and both equal $1$ when the two neighbour sets coincide for every point (@eq-ch12-trustworthiness and @eq-ch12-continuity).
+
+These scores convert a visual claim into a number. If trustworthiness is low, then apparent clusters may be spurious; if continuity is low, then a real structure has been torn apart. Reporting them — together with the *k* used — is the difference between a figure that supports a conclusion and a figure that merely illustrates one.
+
+The neighbourhood size *k* is itself a parameter, so a single score is not enough. Trustworthiness and continuity vary with *k*, and a projection can preserve very small neighbourhoods while distorting larger ones. The honest report gives the score as a function of *k* across a range that matches the scale of the scientific question and states the *k* against which the figure is being judged. Claims about fine structure rest on small *k*; claims about mesoscale grouping rest on larger *k*.
+
+The same logic explains why a two-dimensional projection is not an evaluation benchmark. Downstream tasks such as clustering or classification may give very different answers in the original space and in the projection, and single-cell analyses routinely caution against treating the projection as a quantitative result [@kobak2019art; @luecken2022benchmarking].
+
+# Probing
+
+**Probing** trains a simple classifier on the internal representations of a model to test whether a property is decodable from them. The canonical design is the linear probe [@alain2016understanding]. Write the representation of item $i$ as $\mathbf{x}_i \in \mathbb{R}^d$ and its label as $y_i \in \{0,1\}$; the probe parameters are $\mathbf{w} \in \mathbb{R}^d$ and $b \in \mathbb{R}$, and the probe minimises the $\ell_2$-regularised cross-entropy
+
+$$
+\min_{\mathbf{w},\, b} \;
+-\frac{1}{n}\sum_{i=1}^{n}\Big[\, y_i \log \sigma(\mathbf{w}^\top \mathbf{x}_i + b)
++ (1 - y_i)\log\big(1 - \sigma(\mathbf{w}^\top \mathbf{x}_i + b)\big) \,\Big]
++ \lambda \lVert \mathbf{w} \rVert_2^2 ,
+$$ {#eq-ch12-probe}
+
+with logistic function $\sigma(z) = (1 + e^{-z})^{-1}$ and regularisation strength $\lambda \ge 0$ (@eq-ch12-probe). If such a classifier predicts the property on held-out data, the property is *linearly decodable* from the representation. Probing is a standard tool in both language modeling and biological sequence models, and its methodology has been codified in surveys of analysis methods [@belinkov2019analysis].
+
+## What probes can and cannot show
+
+A successful probe is evidence that information is *present and decodable*, not that the model *uses* it. This gap is the central subtlety of probing. A high-capacity probe can learn the property itself rather than read it off the representation, so probe capacity must be controlled and compared against baselines. Best practice includes **control tasks** — probes on random labels or on shuffled inputs — to establish how much accuracy is achievable without genuine signal, and reporting probe selectivity relative to those controls [@belinkov2022probing]. Formally, if the real probe attains accuracy $\mathrm{acc}_{\mathrm{real}}$ and a control probe on shuffled inputs or random labels attains $\mathrm{acc}_{\mathrm{ctrl}}$, the *selectivity* is
+
+$$
+\mathrm{selectivity} = \mathrm{acc}_{\mathrm{real}} - \mathrm{acc}_{\mathrm{ctrl}},
+$$ {#eq-ch12-probe-selectivity}
+
+which must be positive and large relative to its sampling error; a probe that does not beat its control has learned the task from the labels rather than read it from the representation (@eq-ch12-probe-selectivity) [@belinkov2022probing].
+
+In biology, probing has been used to show that protein language-model embeddings encode structural and functional properties that the training objective never named explicitly: distances between residues, secondary structure, and variant effects emerge in the representation [@rives2021biological], and structure predictions can be read directly from embeddings from the scaled models [@lin2023evolutionary]. These are strong results, but they establish decodability, not mechanism; they do not show that the model's own predictions depend on the probed feature.
+
+# Attribution and attention
+
+Attribution methods assign a score to each input feature indicating its contribution to a prediction. Let $g: \mathbb{R}^{L \times p} \to \mathbb{R}$ be the scalar model output for a sequence of length $L$ with $p$ features per position ($p = 4$ for a one-hot nucleotide, $p = 20$ for an amino-acid indicator). **Saliency maps** take the gradient of the output with respect to the input and use its magnitude as importance [@simonyan2013deep]; the *gradient $\times$ input* variant multiplies the gradient by the input so that large but unused features are not credited:
+
+$$
+\mathbf{S}(\mathbf{x}) = \nabla_{\mathbf{x}} g(\mathbf{x}), \qquad
+\mathbf{M}(\mathbf{x}) = \mathbf{x} \odot \nabla_{\mathbf{x}} g(\mathbf{x}),
+$$ {#eq-ch12-saliency}
+
+where $\odot$ is the elementwise (Hadamard) product (@eq-ch12-saliency). **Integrated gradients** (IG) instead integrate the gradient along the straight path from a baseline input $\mathbf{x}'$ (for example, all-zero padding) to the actual input, satisfying two axioms — sensitivity and implementation invariance — that plain gradients do not [@sundararajan2017axiomatic]:
+
+$$
+\mathrm{IG}_j(\mathbf{x}) = (x_j - x'_j) \int_{0}^{1} \frac{\partial g\big(\mathbf{x}' + \alpha(\mathbf{x} - \mathbf{x}')\big)}{\partial x_j} \, d\alpha ,
+$$ {#eq-ch12-integrated-gradients}
+
+where the index $j$ ranges over the $L \times p$ input features (@eq-ch12-integrated-gradients). The integral is approximated by a Riemann sum of a few dozen steps, and the choice of baseline $\mathbf{x}'$ changes the result. IG is *complete* — $\sum_j \mathrm{IG}_j(\mathbf{x}) = g(\mathbf{x}) - g(\mathbf{x}')$ — so the attributions sum to the difference between the actual and baseline outputs. For sequence models, these methods highlight positions in a DNA, RNA, or protein sequence that most affect a score.
+
+**Attention weights** are frequently presented as explanations because they appear to show where a model "looked". This interpretation is unreliable. Attention weights can be changed without changing predictions and need not correlate with feature importance, so attention is not an explanation in the causal sense [@jain2019attention], and attention-based explanations can be misleading even when they look plausible [@serrano2019attention].
+
+The broader caution is that post-hoc explanations of black-box models are themselves models, trained or constructed with their own assumptions, and can be unfaithful. When decisions carry high stakes, the recommended alternative is to use a model that is interpretable by construction rather than to explain an opaque one after the fact [@rudin2019stop]. For embeddings, the corresponding rule is to treat saliency and attention maps as hypotheses to be tested experimentally, not as established mechanisms.
+
+# Latent-space arithmetic and directions
+
+Embedding spaces often support simple vector arithmetic: adding a difference vector estimated from labelled examples to move an item along a semantic direction [@mikolov2013efficient]. In biology the analogue is a *direction* associated with a property — thermostability, a cell type, or a disease state — computed as the mean difference between two labelled groups. Let $\mathcal{P}$ (respectively $\mathcal{N}$) be the index set of positive (negative) examples, each with embedding $\mathbf{x}_i \in \mathbb{R}^d$. The direction and its unit vector are
+
+$$
+\mathbf{d} = \frac{1}{\lvert \mathcal{P} \rvert}\sum_{i \in \mathcal{P}} \mathbf{x}_i \;-\; \frac{1}{\lvert \mathcal{N} \rvert}\sum_{i \in \mathcal{N}} \mathbf{x}_i,
+\qquad
+\hat{\mathbf{u}} = \frac{\mathbf{d}}{\lVert \mathbf{d} \rVert_2},
+$$ {#eq-ch12-latent-direction}
+
+and the scalar score of a new item is the projection $\langle \mathbf{x}, \hat{\mathbf{u}} \rangle$ (@eq-ch12-latent-direction). Projecting new embeddings onto such directions gives a scalar score that can be used, for example, to rank sequences or cells.
+
+The reliability of these directions depends on how the latent factors are entangled. **Disentanglement** is the property that distinct generative factors correspond to distinct, ideally independent, directions in the latent space, and it is a defining goal of representation learning [@bengio2013representation]. Methods such as the β-VAE encourage it by constraining the variational objective [@higgins2017beta]. In practice, biological embeddings are rarely fully disentangled: directions interact, embeddings are anisotropic, and a direction fitted on one dataset may not transfer. A direction should therefore be validated on held-out data before it is used as a measurement, and reported with the evidence that it does not also encode a confounder such as batch or organism.
+
+# Reporting checklist for embedding figures
+
+A figure is a claim about data. The following do and do not pairs cover the failures most often seen in published embedding figures.
+
+| Do | Do not |
+|---|---|
+| State the reduction method, its parameters, and the preprocessing | Show a projection without saying how it was produced |
+| Fix and report the random seed; show several seeds or settings | Present one run as the definitive structure |
+| Report a trustworthiness or continuity score with the *k* used | Rely on visual appeal as evidence of structure |
+| State that axis directions and inter-cluster distances are not meaningful for *t*-SNE, UMAP, and PHATE | Read cluster sizes or gaps as biology |
+| Color points by a variable with a legend and, where possible, outline groups | Use colour that encodes the label used to define the clusters |
+| Annotate the number of points and any subsampling | Imply that a subsampled plot represents the full dataset |
+| Pair every interpretation with a quantitative test in the original space | Treat a probe or attribution map as a mechanism |
+
+: A do/don't checklist for embedding figures.
+
+::: {.callout-tip}
+## Key Takeaways
+- Match the projection to the claim: PCA for global variance, *t*-SNE and UMAP for local structure, PHATE for transitions [@pearson1901lines; @vandermaaten2008visualizing; @mcinnes2018umap; @moon2019visualizing].
+- Nonlinear projections distort distances, density, and cluster sizes; report parameters and seeds, and never read global geometry off the plot [@kobak2019art; @wattenberg2016how].
+- Quantify neighbourhood preservation with trustworthiness and continuity instead of relying on visual judgement [@kaski2003trustworthiness; @lee2009quality].
+- Probes show that information is decodable, not that a model uses it; control probe capacity and include control tasks [@belinkov2019analysis; @belinkov2022probing].
+- Saliency and integrated gradients attribute a prediction to inputs, but attention weights are not explanations, and post-hoc explanations can be unfaithful [@simonyan2013deep; @sundararajan2017axiomatic; @jain2019attention; @rudin2019stop].
+- Latent directions are useful only when validated on held-out data and shown not to encode confounders [@mikolov2013efficient; @bengio2013representation].
+:::
+
+## Further Reading
+
+- Belinkov and Glass survey analysis methods for neural representations, including probing [@belinkov2019analysis].
+- Belinkov's follow-up gives the current best practices and shortcomings of probing classifiers [@belinkov2022probing].
+- Wattenberg et al. demonstrate, interactively, how to use *t*-SNE honestly [@wattenberg2016how].
+- Kaski et al. introduce trustworthiness and continuity for visualizing similarity of gene expression [@kaski2003trustworthiness].
+- Jain and Wallace and Serrano and Smith show why attention weights are not explanations [@jain2019attention; @serrano2019attention].
+- Rudin argues for inherently interpretable models over post-hoc explanations in high-stakes settings [@rudin2019stop].

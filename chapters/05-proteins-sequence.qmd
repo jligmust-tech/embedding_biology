@@ -2,9 +2,387 @@
 title: "Protein Sequence Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 5*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+Protein sequences are the most information-dense biological strings available: a
+single chain of a few hundred amino acids determines a three-dimensional fold, an
+enzymatic activity, a binding specificity, and the effect of thousands of possible
+point mutations. Proteins also have a natural language-like structure — 20 letters, an
+evolved "vocabulary" of domains and motifs, and strong selective constraints on
+adjacent residues — which is why they became the first biological modality to be
+transformed by large self-supervised language models. This chapter traces protein
+sequence representations from hand-crafted features to protein language models (PLMs),
+with attention to what those representations encode and how they are transferred to
+downstream tasks.
+
+# Classical Features for Protein Sequences
+
+## k-mers, PSSMs, and profiles
+
+The simplest protein encodings reuse the ideas of Chapter 4. **k-mer profiles** count
+the occurrence of short amino-acid substrings; because the alphabet
+$\mathcal{P}$ has $|\mathcal{P}|=20$ letters the feature space grows as $20^{k}$, so $k$
+is kept small. A more informative classical feature
+is the **position-specific scoring matrix (PSSM)** produced by PSI-BLAST, which
+iteratively searches a sequence database and records, for each position, the log-odds
+score of every amino acid relative to the background distribution [@altschul1997gapped].
+Formally, let $\mathbf{S}\in\mathcal{P}^{N\times L}$ be a multiple sequence alignment of
+$N$ sequences of aligned length $L$ and let $q_a$ be the background frequency of residue
+$a$. With column frequencies $p_{i,a}$ estimated from the alignment (optionally
+sequence-weighted, and smoothed with pseudocounts), the PSSM entry at position $i$ for
+residue $a$ is the log-odds score
+
+$$
+M_{i,a} \;=\; \log\frac{p_{i,a}}{q_a},
+\qquad i = 1,\dots,L,\quad a\in\mathcal{P},
+$$ {#eq-ch05-pssm}
+
+so $M\in\mathbb{R}^{L\times 20}$ is a per-position evolutionary profile: it encodes which
+substitutions are tolerated at each site, distilled from the alignment. (@eq-ch05-pssm) is positive where a residue is enriched over background (favoured) and
+negative where it is depleted, exactly the scoring convention PSI-BLAST uses to extend a
+search.
+
+::: {.callout-note}
+## Definition
+
+A **profile hidden Markov model (profile HMM)** is a probabilistic model of a protein
+family in which each consensus position has a match, insert, and delete state, with
+position-specific emission and transition probabilities estimated from an MSA
+[@eddy2011accelerated]. A **PSSM** is the log-odds matrix form of the same idea. Both
+are *evolutionary* representations: they summarize the substitution tolerance at each
+position rather than the raw sequence, and they were the dominant protein features for
+two decades.
 :::
 
-TODO
+## Physicochemical scales
+
+Independent of evolutionary information, amino acids can be described by
+physicochemical properties. **Hydropathy scales** such as the Kyte–Doolittle scale
+assign each residue a value measuring its tendency to be buried in a membrane versus
+exposed to solvent [@kyte1982simple]. Sliding such a scale along a sequence predicts
+transmembrane segments, and concatenations of several scales (hydrophobicity, charge,
+volume, polarity) form compact hand-crafted feature vectors that remain useful for
+small-data tasks where no pretrained model is available. Their weakness is that they
+are fixed, low-dimensional, and cannot express context-dependent effects.
+
+# Unsupervised Protein Vectors: ProtVec and UniRep
+
+**ProtVec** [@asgari2015continuous] transplanted word2vec [@mikolov2013efficient] to
+proteins: sequences are split into overlapping or non-overlapping 3-mers, each 3-mer
+("biological word") $w\in\mathcal{P}^{3}$ receives a dense vector
+$\mathbf{v}_w\in\mathbb{R}^{100}$, and a protein is represented by pooling its 3-mer
+vectors,
+
+$$
+f(s) \;=\; \frac{1}{n}\sum_{j=1}^{n}\mathbf{v}_{w_j},
+\qquad w_j = s_{j:j+2},\quad f(s)\in\mathbb{R}^{100},
+$$ {#eq-ch05-protvec}
+
+where $n$ is the number of 3-mers extracted from the sequence $s$. Because the sum is
+order-invariant, $f(s)=f(s')$ whenever two sequences have the same 3-mer multiset — a
+formal statement of what pooling discards. The distinct-3-mer space has size
+$20^{3}=8{,}000$, the protein analogue of the $4^{k}$ k-mer space of Chapter 4. The same
+method was applied to DNA, making ProtVec one of the first unified sequence-embedding
+schemes. Its embeddings capture biophysical and functional similarity well enough for
+family classification, but the representation is a bag of 3-mers: order and long-range
+context are lost, and each 3-mer has one vector regardless of its position.
+
+**UniRep** [@alley2019unified] replaced pooling with a recurrent language model. A
+multiplicative LSTM produces a hidden state $\mathbf{h}_i\in\mathbb{R}^{d}$ from the
+prefix $s_{<i}$ and predicts the next residue; with weights $\mathbf{W}_{\mathrm{out}}\in
+\mathbb{R}^{20\times d}$ and bias $\mathbf{c}\in\mathbb{R}^{20}$, the pretraining
+objective minimizes the summed negative log-likelihood
+
+$$
+\mathcal{L}_{\mathrm{AR}}(\theta) \;=\;
+-\sum_{i=1}^{L}\log p_\theta\!\left(s_i \mid s_{<i}\right),
+\qquad
+p_\theta\!\left(s_i \mid s_{<i}\right)
+= \operatorname{softmax}\!\left(\mathbf{W}_{\mathrm{out}}\mathbf{h}_i+\mathbf{c}\right)_{s_i},
+$$ {#eq-ch05-ar-loss}
+
+over the recurrent and output parameters $\theta$. (@eq-ch05-ar-loss) is minimized on
+roughly 24 million UniRef50 sequences with this "next amino acid" objective combined with
+a contrastive term, and the final hidden state yields a fixed-length per-protein
+embedding that can be used downstream without task-specific labels [@alley2019unified].
+UniRep demonstrated the central promise of protein representation learning: a single
+unsupervised model produces embeddings that transfer to diverse tasks, and it can be
+fine-tuned for protein engineering — for example, to extrapolate protein stability or
+fluorescence from a small set of measurements [@alley2019unified].
+
+# Supervised and Transfer Baselines: TAPE
+
+Progress on protein embeddings was difficult to assess until **TAPE** (Tasks Assessing
+Protein Embeddings) standardized the evaluation [@rao2019evaluating]. TAPE defines a
+suite of tasks spanning secondary-structure prediction, contact prediction, remote
+homology detection, fluorescence prediction, and stability prediction, together with
+fixed data splits and reporting conventions. Crucially, TAPE established the
+*pretrain → transfer* protocol that later PLMs would adopt: models are pretrained
+without labels and then either fine-tuned on each task or evaluated with a shallow
+predictor on frozen embeddings, and the comparison is only meaningful when the same
+protocol is applied to all methods [@rao2019evaluating].
+
+TAPE also made explicit why protein transfer learning is attractive in the first place:
+labeled data for a given protein property is usually scarce, while unlabeled sequence
+data is effectively unlimited, so a pretrained representation that captures general
+sequence–structure–function relationships is a plausible starting point for small
+downstream tasks. Whether it actually helps in a given case is an empirical question
+that the fixed TAPE protocol is designed to answer, and the reported benefit varies by
+task rather than being automatic [@rao2019evaluating].
+
+# Protein Language Models
+
+A **protein language model** treats the amino-acid sequence as text and is pretrained
+with masked language modeling [@devlin2019bert] or an autoregressive objective on large
+sequence databases. Because evolution has already selected sequences that fold and
+function, the pretraining signal is unusually informative: to fill a masked position a
+model must learn which substitutions are biophysically and evolutionarily plausible,
+which implicitly requires a model of structure and function. The PLM family differs
+mainly in architecture, training corpus, and whether it consumes single sequences or
+MSAs.
+
+For the masked objective, let $s\in\mathcal{P}^{L}$ be a sequence,
+$\mathcal{M}\subseteq\{1,\dots,L\}$ a random set of masked positions drawn from a masking
+distribution $p_{\mathrm{mask}}$ (positions sampled independently at a fixed rate,
+replaced by a mask token), and $s_{\overline{\mathcal{M}}}$ the unmasked residues. The
+parameters $\theta$ are chosen to minimize
+
+$$
+\mathcal{L}_{\mathrm{MLM}}(\theta)
+= -\,\mathbb{E}_{s\sim\mathcal{D}}\;\mathbb{E}_{\mathcal{M}\sim p_{\mathrm{mask}}}
+\left[\sum_{i\in\mathcal{M}}\log p_\theta\!\left(s_i \mid s_{\overline{\mathcal{M}}}\right)\right],
+$$ {#eq-ch05-mlm-protein}
+
+on the pretraining corpus $\mathcal{D}$, with each
+$p_\theta(s_i\mid s_{\overline{\mathcal{M}}})$ categorical over the $20$ amino acids. The encoder itself is the embedding: it maps
+residues to *contextual* vectors $\mathbf{h}_i\in\mathbb{R}^{d}$ that depend on the whole
+surrounding sequence, and a whole-protein vector is obtained by pooling,
+
+$$
+f_\theta(s) \;=\; \operatorname{pool}\!\left(\mathbf{h}_1,\dots,\mathbf{h}_L\right)
+\in\mathbb{R}^{d},
+$$ {#eq-ch05-protein-embed}
+
+where the pool is a mean, a designated summary token, or another reduction. Residue-level
+tasks instead read the matrix $\mathbf{H}\in\mathbb{R}^{L\times d}$ of per-residue
+embeddings directly. (@eq-ch05-mlm-protein) and (@eq-ch05-protein-embed) separate the two
+quantities that are often conflated: the loss is an auxiliary device for training $\theta$,
+whereas $f_\theta$ is what is actually transferred. Unlike the static ProtVec of (@eq-ch05-protvec), a single residue now receives different vectors in different contexts.
+
+**ProtBERT and ProtT5** [@elnaggar2022prottrans] were among the first large
+protein language models. ProtBERT follows the BERT encoder and is pretrained either on
+UniRef100 (ProtBERT) or on the much larger BFD database of over two billion sequences
+(ProtBERT-BFD); ProtT5 adapts the T5 encoder–decoder with a SentencePiece tokenizer and
+is trained on UniRef50 [@elnaggar2022prottrans]. The ProtTrans study showed that these
+embeddings transfer to secondary structure, subcellular localization, and membrane
+prediction, and — importantly for practitioners — that per-residue embeddings can be
+extracted and pooled for downstream tasks without retraining.
+
+**ESM-1b** [@rives2021biological] is a 650-million-parameter transformer trained with
+masked language modeling on roughly 250 million protein sequences. Its representations
+exhibit emergent structure: a linear projection of attention and embedding features
+predicts three-dimensional contacts, and the model's internal states capture secondary
+structure, contact maps, and evolutionary conservation without any supervision
+[@rives2021biological]. **ESM-2** [@lin2023evolutionary] scales the same recipe from a
+few million to 15 billion parameters and trains on UniRef50; the largest models reach
+atomic-resolution structure prediction accuracy, and the same representation underlies
+**ESMFold**, which predicts structure directly from single sequences at high throughput
+[@lin2023evolutionary]. Structure prediction is thus the canonical *downstream* use of
+a protein sequence embedding, complementing structure-native methods such as AlphaFold
+[@jumper2021highly] and its open reproduction OpenFold [@ahdritz2024openfold].
+
+**Ankh** [@elnaggar2023ankh] is a T5-based PLM designed for efficiency, reporting strong
+transfer performance with fewer parameters and less compute than contemporaneous
+models by optimizing pretraining and architecture choices [@elnaggar2023ankh].
+**ProteinBERT** [@brandes2022proteinbert] combines masked language modeling with a
+novel Gene Ontology annotation-prediction objective, learns both local (per-residue)
+and global (per-protein) representations in one model, and remains competitive on
+diverse benchmarks despite being far smaller and faster than competing PLMs
+[@brandes2022proteinbert].
+
+@tbl-plm-models compares representative models. Parameter counts and context
+lengths are approximate, compiled from the cited primary sources, and are intended for
+orientation rather than exact reproduction.
+
+| Model | Tokenizer | Context | Pretraining corpus | Parameters (approx.) |
+|---|---|---|---|---|
+| ProtVec [@asgari2015continuous] | Non-overlapping 3-mers | bag of 3-mers | UniProt (Swiss-Prot) | 100-dim per 3-mer |
+| UniRep [@alley2019unified] | Single residue | long (mLSTM) | UniRef50 (~24M) | ~18M |
+| ProtBERT-BFD [@elnaggar2022prottrans] | Single residue | 512 residues | BFD (~2.1B sequences) | 420M |
+| ProtT5-XL-UniRef50 [@elnaggar2022prottrans] | SentencePiece | 512 residues | UniRef50 | ~3B |
+| ESM-1b [@rives2021biological] | Single residue | 1,024 residues | UniRef (~250M sequences) | 650M |
+| ESM-2 [@lin2023evolutionary] | Single residue | 1,024 residues | UniRef50 | 8M–15B |
+| Ankh [@elnaggar2023ankh] | SentencePiece | 512 residues | UniRef50 | ~450M–1.9B |
+| ProteinBERT [@brandes2022proteinbert] | Single residue + GO | long | UniRef + GO annotations | ~16M |
+
+: Representative protein sequence models. Tokenization, corpus, and parameter figures
+are approximate values reported by the primary sources. {#tbl-plm-models}
+
+# What the Representations Encode
+
+Because PLMs are not trained on structure or function labels, what they learn must be
+probed. Three families of evidence recur.
+
+**Structure.** ESM-1b's attention heads and hidden states predict residue–residue
+contacts, and a linear map from embeddings to contact maps recovers protein topology
+without supervision [@rives2021biological]. ESM-2 pushes this further until structure
+prediction itself becomes accurate enough to compete with dedicated folding models
+[@lin2023evolutionary].
+
+**Function and annotation.** Embeddings transfer to subcellular localization, enzyme
+function, and Gene Ontology annotation; ProteinBERT's GO-prediction objective makes the
+functional signal explicit [@brandes2022proteinbert], and ProtTrans demonstrated
+transfer across structure, localization, and membrane tasks [@elnaggar2022prottrans].
+
+**Mutational effects.** Because a PLM assigns a likelihood to a sequence, the change in
+that likelihood under a mutation — the log-likelihood ratio — is a natural zero-shot
+fitness score. For an autoregressive model the change telescopes. Writing
+$s'$ for the mutant of wild-type $s$ differing at position $j$, the prefix terms cancel
+because $s'_{<j}=s_{<j}$, leaving only the terms from $j$ onward:
+
+$$
+\Delta(s\!\to\!s') \;=\; \log p_\theta(s')-\log p_\theta(s)
+\;=\;\sum_{i=j}^{L}\log
+\frac{p_\theta\!\left(s'_i \mid s'_{<i}\right)}{p_\theta\!\left(s_i \mid s_{<i}\right)}.
+$$ {#eq-ch05-mut-effect}
+
+When the mutation leaves the model's later conditionals unchanged, (@eq-ch05-mut-effect) reduces to the single-position log-ratio
+$\log\bigl[p_\theta(s'_j\mid s_{<j})\big/p_\theta(s_j\mid s_{<j})\bigr]$;
+masked models replace the single-pass likelihood by a masked-marginal or pseudo-likelihood
+estimate $\sum_i\log p_\theta(s_i\mid s_{\setminus i})$, with the same interpretation —
+higher model likelihood means a more evolutionarily plausible sequence. This signal
+correlates with experimental measurements of protein fitness and variant effect, making
+embeddings useful for variant-effect prediction even before any task-specific training
+[@rao2019evaluating; @lin2023evolutionary]. Probing studies collectively show that the
+information required for these tasks is present in the pretrained representation, but
+that *where* it is linearly accessible varies by layer, which is why layer choice is
+itself a hyperparameter in probing workflows.
+
+::: {.callout-note}
+## Definition
+
+**Probing** is the practice of training a simple, usually linear, predictor on frozen
+embeddings to test whether a property is explicitly accessible in the representation.
+A *probing* evaluation answers "is this information linearly decodable?"; a
+*fine-tuning* evaluation answers "can the model be adapted to use this information?".
+The two can disagree, and reporting both is the standard way to characterize a PLM.
+:::
+
+A linear probe makes this precise. With the encoder frozen so the embeddings
+$\mathbf{h}_i$ are fixed, fit a weight vector $\mathbf{w}\in\mathbb{R}^{d}$ and bias
+$b\in\mathbb{R}$ that minimize the cross-entropy over $n$ labeled examples,
+
+$$
+\min_{\mathbf{w},b}\;\sum_{i=1}^{n}
+\ell\!\left(\sigma(\mathbf{w}^{\top}\mathbf{h}_i+b),\,y_i\right),
+\qquad
+\ell(\hat y,y) = -\bigl[\,y\log\hat y + (1-y)\log(1-\hat y)\,\bigr],
+$$ {#eq-ch05-probe}
+
+where $\sigma$ is the logistic function. (@eq-ch05-probe) is convex in
+$(\mathbf{w},b)$ for fixed features, so its optimum is unique and its accuracy is a clean
+measure of how linearly decodable the probed property is. A fine-tuned model instead
+updates $\theta$ as well, which is more powerful but no longer isolates the frozen
+representation.
+
+# Practicalities: MSAs, Single Sequences, Scaling, and Compute
+
+**MSA-based versus single-sequence models.** Evolutionary information can enter a
+representation in two ways. Methods such as PSSMs, profile HMMs
+[@altschul1997gapped; @eddy2011accelerated], and AlphaFold's input features
+[@jumper2021highly] consume a multiple sequence alignment, which supplies covariation
+signal across homologs but requires an alignment to be built and degrades for orphan
+sequences. PLMs such as ESM-2 take a *single* sequence and learn to emulate the
+evolutionary signal from the raw corpus. The **MSA Transformer** [@rao2021msa] spans
+both worlds: it attends jointly over the rows of an MSA and produces tie-averaged
+embeddings, letting the same model serve single-sequence and alignment inputs. For a
+protein with many homologs, MSA-aware models exploit more signal; for a metagenomic or
+designed sequence with no usable alignment, a single-sequence PLM is the only option, so
+the split is a practical constraint, not merely a modeling preference.
+
+**Scaling and compute.** Protein representation quality improves with model size and
+data, following the scaling behavior seen in natural language: ESM-2 spans four orders
+of magnitude of parameters and improves monotonically on structure prediction
+[@lin2023evolutionary], and ProtTrans and the Nucleotide Transformer study scaling
+explicitly [@elnaggar2022prottrans]. The practical consequence is that the best
+embeddings are expensive to produce: extracting per-residue embeddings for a large
+proteome requires GPU inference at scale, and fine-tuning the larger models may exceed
+the compute available to a typical laboratory. Distilled or smaller models
+[@brandes2022proteinbert; @elnaggar2023ankh] are the usual compromise when compute is
+the binding constraint.
+
+**Choosing a representation.** The practical decision is usually driven by three
+constraints rather than by benchmark rank. First, task granularity: residue-level tasks
+(secondary structure, contact maps, variant effect at a specific position) need
+per-residue embeddings, whereas whole-protein tasks (localization, family assignment,
+stability) work with a pooled vector. Second, data volume: a linear probe on frozen
+embeddings has far fewer trainable parameters than full fine-tuning, so with only a
+few dozen labeled examples a probe can overfit less, whereas with thousands of labels
+fine-tuning can recover more of the model's capacity. Third, homology: if a protein has close homologs
+in the pretraining corpus, embedding quality is inflated relative to a genuinely novel
+sequence, so evaluation splits must control for homology — otherwise reported
+performance reflects memorization of related sequences rather than generalization.
+These considerations are not specific to proteins, but they bite harder here because
+the gap between a well-studied family and an orphan sequence is unusually large.
+
+The standard transfer pipeline is shown in @fig-plm-transfer. A sequence is
+tokenized, passed through a pretrained PLM, and its embeddings are used either frozen
+(with a linear probe or shallow head) or fine-tuned end-to-end.
+
+::: {#fig-plm-transfer}
+```{mermaid}
+flowchart LR
+  U["Unlabeled sequences (UniRef/BFD)"] --> T["Tokenize residues"]
+  T --> P["Pretrained PLM (masked LM)"]
+  P -- "frozen embeddings" --> LP["Linear probe / shallow head"]
+  P -- "fine-tune all weights" --> FT["Fine-tuned model"]
+  LP --> D["Downstream: structure, function, variant effects, stability"]
+  FT --> D
+```
+
+Pretrain → transfer pipeline for protein language models. A PLM is pretrained with masked language modeling on unlabeled sequences; downstream, its embeddings are either frozen and read by a shallow predictor (probing) or fine-tuned on the target task.
+:::
+
+A minimal embedding extraction looks like this in practice:
+
+```python
+from transformers import AutoTokenizer, AutoModel
+
+tok = AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
+model = AutoModel.from_pretrained("facebook/esm2_t33_650M_UR50D")
+
+seq = "MKTAYIAKQRQISFVKSHFSRQ"
+inputs = tok(seq, return_tensors="pt")
+out = model(**inputs)
+
+per_residue = out.last_hidden_state[0]   # (L, d)
+protein_embedding = per_residue.mean(0)  # (d,) pooled
+```
+
+::: {.callout-tip}
+## Key Takeaways
+
+- Classical protein features — k-mer profiles, PSSMs, profile HMMs, and
+  physicochemical scales — summarize evolution or biophysics but are fixed and
+  context-free.
+- ProtVec introduced dense unsupervised 3-mer embeddings; UniRep showed that a
+  recurrent unsupervised model yields transferable per-protein vectors.
+- TAPE standardized the pretrain → transfer protocol (frozen probing and fine-tuning)
+  and made protein-embedding comparisons meaningful.
+- ProtBERT/ProtT5, ESM-1b, ESM-2, and Ankh form the modern PLM family, differing mainly
+  in architecture, corpus, and scale; ESM-2 and ESMFold show that sequence embeddings
+  can reach atomic-resolution structure prediction.
+- PLM representations encode structure, function, and mutational effect signals: linear
+  probes recover contacts, and zero-shot likelihood ratios predict fitness, so layer
+  choice and probing-versus-fine-tuning must both be reported.
+- MSA-based models (PSSMs, profile HMMs, AlphaFold, MSA Transformer) exploit homolog
+  covariation but need alignments; single-sequence PLMs work on orphan and designed
+  sequences at the cost of higher compute.
+:::
+
+## Further Reading
+
+- Asgari & Mofrad, *ProtVec* — word2vec-style protein embeddings. <https://doi.org/10.1371/journal.pone.0141287>
+- Alley et al., *UniRep* — unified rational protein engineering with sequence-based deep representation learning. <https://doi.org/10.1038/s41592-019-0598-1>
+- Rao et al., *TAPE* — benchmarking protein transfer learning. <https://arxiv.org/abs/1906.08230>
+- Elnaggar et al., *ProtTrans* — self-supervised protein language models. <https://doi.org/10.1109/TPAMI.2021.3095381>
+- Rives et al., *ESM-1b* — biological structure and function emerge from scaling. <https://doi.org/10.1073/pnas.2016239118>
+- Lin et al., *ESM-2 and ESMFold* — atomic-level structure prediction with a language model. <https://doi.org/10.1126/science.ade2574>

@@ -2,9 +2,465 @@
 title: "Protein Structure Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 6*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+A protein is not a string; it is a physical object that folds into a specific
+three-dimensional shape, and that shape is what performs catalysis, binds
+partners, and transmits signals. Sequence embeddings (Chapter 5) capture
+evolutionary and functional regularities, but they are one projection of the
+same underlying object. This chapter treats the complementary projection: how a
+protein's 3D structure is turned into a fixed-length vector, and what
+guarantees those vectors must satisfy before they can be useful.
+
+The central difficulty is that structure is a *set of points in space*, not a
+sequence with a canonical order. Any representation of geometry must therefore
+be immune to arbitrary choices of coordinate system. Getting this right — or
+wrong — determines whether a model learns shape or memorizes noise.
+
+# Representing Protein Structure
+
+A structure is most directly a table of Cartesian coordinates, one per atom, as
+deposited in the Protein Data Bank or predicted by a folding model such as
+AlphaFold2 [@jumper2021highly]. Downstream representations almost never consume
+raw coordinates directly; they consume derived objects that encode the same
+geometry in a form more amenable to learning.
+
+## Coordinates
+
+Let $\mathbf{x}_i \in \mathbb{R}^3$ denote the position of atom (or residue)
+$i$ for $i = 1, \dots, N$, and let $\mathbf{P} \in \mathbb{R}^{N \times 3}$ be the
+coordinate matrix whose $i$-th row is $\mathbf{x}_i^{\top}$. Raw coordinates are
+the most information-rich object, but they are also the most fragile: applying a
+rigid motion — a rotation $\mathbf{R} \in SO(3)$ (so that
+$\mathbf{R}^{\top}\mathbf{R} = \mathbf{I}$ and $\det \mathbf{R} = +1$) and a
+translation $\mathbf{t} \in \mathbb{R}^3$ — sends
+$\mathbf{x}_i \mapsto \mathbf{R}\mathbf{x}_i + \mathbf{t}$ and so changes every
+coordinate without changing the molecule. A model that reads raw $\mathbf{x}_i$
+therefore sees two different inputs for the same structure, which is exactly the
+redundancy that invariance is meant to remove.
+
+## Distance matrices and contact maps
+
+A rotation- and translation-invariant description is the **distance matrix**
+$D \in \mathbb{R}^{N \times N}$,
+
+$$ D_{ij} = \lVert \mathbf{x}_i - \mathbf{x}_j \rVert_2, \qquad i, j = 1, \dots, N $$ {#eq-ch06-distance-matrix}
+
+where $\lVert \cdot \rVert_2$ is the Euclidean norm (Appendix A). Its entries are
+invariant under any rigid motion: substituting
+$\mathbf{x}_i \mapsto \mathbf{R}\mathbf{x}_i + \mathbf{t}$ and
+$\mathbf{x}_j \mapsto \mathbf{R}\mathbf{x}_j + \mathbf{t}$ gives
+
+$$ \lVert (\mathbf{R}\mathbf{x}_i + \mathbf{t}) - (\mathbf{R}\mathbf{x}_j + \mathbf{t}) \rVert_2 = \lVert \mathbf{R}(\mathbf{x}_i - \mathbf{x}_j) \rVert_2 = \lVert \mathbf{x}_i - \mathbf{x}_j \rVert_2 $$ {#eq-ch06-distance-invariance}
+
+because the translation cancels and rotations preserve length,
+$\lVert \mathbf{R}\mathbf{y} \rVert_2 = \lVert \mathbf{y} \rVert_2$ (since
+$\mathbf{R}^{\top}\mathbf{R} = \mathbf{I}$). The distance matrix therefore
+depends only on intrinsic geometry, not on the coordinate frame in which the
+structure happens to be expressed.
+
+A coarser relative is the **contact map** $C \in \{0,1\}^{N \times N}$,
+
+$$ C_{ij} = \mathbb{1}[\,D_{ij} < \tau\,] $$ {#eq-ch06-contact-map}
+
+where $\mathbb{1}[\cdot]$ is the indicator function (1 when the condition holds,
+0 otherwise) and $\tau > 0$ is a distance threshold (commonly
+$\tau \approx 8\,\text{\AA}$ for heavy-atom contacts). Because $C$ is a
+deterministic function of $D$, the contact map of (@eq-ch06-contact-map)
+inherits the invariance in (@eq-ch06-distance-invariance). It discards most
+of the metrical detail but is compact and robust, and was the standard input to
+early residue-contact predictors.
+
+Distances are not perfectly lossless: mirror images share the same distance
+matrix but are distinct molecules. Adding chirality-sensitive features (dihedral
+angles, or the signed orientation of bonded frames) resolves this.
+
+## Graphs
+
+The most common modern view is a graph on residues, where node $i$ carries
+features (amino-acid identity, secondary structure, a learned embedding) and
+edges encode proximity. Edges are typically drawn between the $k$ nearest
+neighbors in 3D, between sequence neighbors, or within a radius. Edge features
+are made invariant by storing distances rather than displacement vectors, and
+node updates follow the message-passing template of Gilmer et al.
+[@gilmer2017neural]: each node's new state is a learned function of its current
+state and the states of its neighbors. The conversion from coordinates to a
+residue graph is the pivotal modelling decision of the whole chapter, and is
+summarized in @fig-coord-graph.
+
+::: {.callout-note}
+## Definition
+A **graph representation** of a protein structure is a tuple
+$(\mathcal{V}, \mathcal{E})$ with node features and edge features. **Node
+features** describe individual residues; **edge features** describe relationships
+between residues and are built to be invariant under rigid motions (for example,
+distances). A **geometric** graph neural network is one whose node or edge
+features additionally carry rotation-sensitive quantities such as directions.
 :::
 
-TODO
+Formally, write the residue graph as $G = (\mathcal{V}, \mathcal{E})$ with vertex
+set $\mathcal{V} = \{1, \dots, N\}$, edge set
+$\mathcal{E} \subseteq \mathcal{V} \times \mathcal{V}$, node features
+$\mathbf{h}_i^{(0)} \in \mathbb{R}^{d_h}$, and edge features
+$\mathbf{e}_{ij} \in \mathbb{R}^{d_e}$. Edges are constructed from the geometry,
+for example by radius or by $k$-nearest neighbors,
+
+$$ (i, j) \in \mathcal{E} \iff D_{ij} \le r \ \ \text{or} \ \ j \in \operatorname{kNN}(i) $$ {#eq-ch06-graph}
+
+where $r > 0$ is a radius, $\operatorname{kNN}(i)$ is the set of $k$ indices
+nearest to $i$ under $D$, and $D$ is the distance matrix of (@eq-ch06-distance-matrix). Because both criteria in (@eq-ch06-graph) are
+functions of $D$ alone, the edge set is also invariant under rigid motion.
+
+The graph view makes the **permutation** symmetry explicit. Stack the node
+features into $\mathbf{H} \in \mathbb{R}^{N \times d_h}$; relabelling the residues
+by a permutation $\pi$ acts as $\mathbf{H} \mapsto \boldsymbol{\Pi}\mathbf{H}$,
+where $\boldsymbol{\Pi} \in \{0,1\}^{N \times N}$ is the permutation matrix with
+$\Pi_{\pi(i), i} = 1$ and $\boldsymbol{\Pi}^{\top}\boldsymbol{\Pi} = \mathbf{I}$.
+A graph encoder that aggregates over neighbors with a permutation-invariant
+operator and pools with a permutation-invariant readout $R$ satisfies
+
+$$ R\big(\{\mathbf{h}_{\pi(i)}\}_{i \in \mathcal{V}}\big) = R\big(\{\mathbf{h}_i\}_{i \in \mathcal{V}}\big) \quad \text{for every permutation } \pi $$ {#eq-ch06-permutation-invariance}
+
+so its output is a function of the *set* of residues, not of the arbitrary index
+order in which they were listed. This is why a distance matrix, which is
+order-dependent as an array, and a graph, which is order-agnostic, can encode the
+same geometry.
+
+```python
+# Coordinate tensor vs. graph representation (illustrative)
+import numpy as np
+
+coords = np.load("residue_ca.npy")          # (N, 3) Cartesian coordinates
+D = np.linalg.norm(coords[:, None] - coords[None], axis=-1)   # (N, N) distances
+k = 10
+knn = np.argsort(D, axis=1)[:, 1:k + 1]     # (N, k) nearest neighbors
+edge_index = np.stack([np.repeat(np.arange(len(coords)), k), knn.reshape(-1)])
+```
+
+::: {#fig-coord-graph}
+*Coordinate versus graph representations.* Left: a protein is a cloud of points
+$\mathbf{x}_i$ together with edges; the coordinates change under rotation and
+translation while the graph and its distance edge features do not. Right: the
+same structure is encoded either as a distance/contact matrix (an $N \times N$
+array, order-dependent) or as a residue graph (node features plus an edge list,
+order-agnostic). The graph formulation is what GNN-based structure encoders
+consume.
+:::
+
+# Invariance and Equivariance
+
+The vocabulary that makes the above precise is invariance and equivariance.
+
+::: {.callout-note}
+## Definition
+Let $f$ be a function on structures and let $g \cdot x$ be the action of a
+transformation $g$ (rotation, translation, or node permutation). Then $f$ is
+**invariant** if $f(g \cdot x) = f(x)$, and **equivariant** if
+$f(g \cdot x) = g \cdot f(x)$ — the output transforms in lockstep with the input.
+:::
+
+For the rigid motions relevant here, let the encoder act on the coordinate
+matrix $\mathbf{P} \in \mathbb{R}^{N \times 3}$ (rows $\mathbf{x}_i^{\top}$), and
+let a rotation $\mathbf{R} \in SO(3)$ and translation $\mathbf{t} \in
+\mathbb{R}^3$ act by $\mathbf{P} \mapsto \mathbf{R}\mathbf{P} + \mathbf{1}_N
+\mathbf{t}^{\top}$, where $\mathbf{1}_N \in \mathbb{R}^N$ is the all-ones column
+vector. A **scalar** encoder is invariant when
+
+$$ f\!\left(\mathbf{R}\mathbf{P} + \mathbf{1}_N \mathbf{t}^{\top}\right) = f(\mathbf{P}) \qquad \text{(invariance)} $$ {#eq-ch06-invariance}
+
+and a **coordinate-valued** encoder is equivariant when
+
+$$ f\!\left(\mathbf{R}\mathbf{P} + \mathbf{1}_N \mathbf{t}^{\top}\right) = \mathbf{R}\, f(\mathbf{P}) + \mathbf{1}_N \mathbf{t}^{\top} \qquad \text{(equivariance)}. $$ {#eq-ch06-equivariance}
+
+A node-wise equivariant vector field $\mathbf{v}_i \in \mathbb{R}^3$ is the
+special case $\mathbf{v}_i(\mathbf{R}\mathbf{P} + \mathbf{1}_N\mathbf{t}^{\top})
+= \mathbf{R}\,\mathbf{v}_i(\mathbf{P})$; a node-wise invariant embedding
+$\mathbf{h}_i \in \mathbb{R}^{d}$ satisfies
+$\mathbf{h}_i(\mathbf{R}\mathbf{P} + \mathbf{1}_N\mathbf{t}^{\top}) =
+\mathbf{h}_i(\mathbf{P})$.
+
+Equivariant vector features are turned into invariant scalars by taking norms
+and inner products: for vectors $\mathbf{v}_i, \mathbf{v}_j \in \mathbb{R}^3$
+that transform as $\mathbf{v} \mapsto \mathbf{R}\mathbf{v}$,
+
+$$ \lVert \mathbf{R}\mathbf{v}_i \rVert_2 = \lVert \mathbf{v}_i \rVert_2, \qquad \langle \mathbf{R}\mathbf{v}_i, \mathbf{R}\mathbf{v}_j \rangle = \langle \mathbf{v}_i, \mathbf{v}_j \rangle $$ {#eq-ch06-invariant-scalarization}
+
+since $\mathbf{R}^{\top}\mathbf{R} = \mathbf{I}$. This **scalarization** is what
+lets a network mix rotation-sensitive directions into rotation-invariant
+descriptors without ever having to align two coordinate frames.
+
+Three symmetries matter here. **Translation** invariance means absolute position
+is irrelevant; only relative geometry counts. **Rotation** (and reflection)
+invariance means the embedding does not depend on how the molecule is oriented in
+the frame. **Permutation** invariance means the result does not depend on the
+arbitrary order in which atoms or residues are listed — a set, not a sequence.
+A fourth, weaker requirement is often imposed for sequence-conditioned tasks:
+the representation should be *equivariant* under a residue reordering only to the
+extent that the underlying graph is relabelled with it.
+
+## What each architecture guarantees
+
+@tbl-equivariance states, for the methods discussed below, which symmetries
+hold by construction and how they are obtained. The pattern is consistent:
+invariant scalar embeddings come from distances and angles, while equivariant
+vector or coordinate outputs come from explicitly geometric updates.
+
+| Method | Representation | Rotation | Translation | Permutation | Mechanism |
+|:--|:--|:--|:--|:--|:--|
+| GVP-GNN [@jing2021learning] | scalar + vector channels | invariant scalars / equivariant vectors | invariant | invariant | geometric vector perceptron separates scalar and vector features |
+| EGNN [@satorras2021n] | node scalars + coordinates | equivariant | invariant | invariant | updates coordinates from weighted relative differences |
+| GearNet [@zhang2023protein] | residue graph, distance edges | invariant | invariant | invariant | edge features are distances/angles only |
+| ProteinMPNN [@dauparas2022robust] | backbone graph, orientations | invariant | invariant | invariant (decoder order fixed) | relative distances and frames |
+| AlphaFold2 [@jumper2021highly] | MSA + pair + frames | equivariant coordinates | invariant | invariant | invariant point attention over local frames |
+| ESM-IF [@hsu2022learning] | backbone coordinate graph | invariant | invariant | invariant | GVP-style encoder over backbone |
+| TM-vec [@hamamsy2022tmvec] | one vector per structure | invariant | invariant | invariant (set of residues) | supervised by TM-align superposition |
+
+: Invariance and equivariance properties of representative protein structure
+encoders. "Invariant" means the output does not change; "equivariant" means it
+changes with the input transformation. All methods are invariant to permutation
+of the input ordering (@eq-ch06-permutation-invariance). {#tbl-equivariance}
+
+Each entry in @tbl-equivariance is an instance of (@eq-ch06-invariance)
+or (@eq-ch06-equivariance). Scalar-only encoders (**GearNet**, **TM-vec**) build every
+feature from invariant quantities — pairwise distances and bond/dihedral angles —
+so their outputs are invariant by (@eq-ch06-invariant-scalarization).
+GVP-style encoders split features into an invariant scalar channel and an
+equivariant vector channel, with the vector channel transforming as
+$\mathbf{V} \mapsto \mathbf{R}\mathbf{V}$ (@eq-ch06-gvp); **ESM-IF** uses
+this over backbone geometry. **EGNN** propagates coordinates through
+(@eq-ch06-egnn-update), giving translation-invariant, rotation-equivariant
+node coordinates. **ProteinMPNN** and **AlphaFold2** are best described by the
+*conditional* form: their predicted sequence likelihood
+(@eq-ch06-inverse-folding) and their output coordinates are functions of
+rotation-invariant features, so a global rigid motion leaves the likelihood
+unchanged and rotates the predicted coordinates in lockstep. In every case the
+guarantee is a consequence of *what the features are* — invariant scalars versus
+equivariant vectors — not of an architectural trick applied afterward.
+
+# Graph Neural Networks and Geometric Methods
+
+## GVP-GNN
+
+The Geometric Vector Perceptron (GVP) network [@jing2021learning] represents each
+residue node with two parallel channels: scalar features (invariant) and vector
+features (equivariant). Write a GVP input as a pair $(\mathbf{s}, \mathbf{V})$
+with $\mathbf{s} \in \mathbb{R}^{n}$ and $\mathbf{V} \in \mathbb{R}^{\nu \times
+3}$ (each of the $\nu$ rows a 3-vector). A GVP layer produces
+$(\mathbf{s}', \mathbf{V}')$ by
+
+$$ \mathbf{s}' = \mathrm{ReLU}\!\left(\mathbf{W}_m \mathbf{s} + \mathbf{b}\right), \qquad \mathbf{V}' = \sigma^{+}\!\left(\mathbf{W}_\mu \mathbf{s} + \mathbf{b}'\right) \odot \left(\mathbf{W}_\nu \mathbf{V}\right) $$ {#eq-ch06-gvp}
+
+where $\mathbf{W}_m \in \mathbb{R}^{m \times n}$,
+$\mathbf{W}_\mu \in \mathbb{R}^{\mu \times n}$, and
+$\mathbf{W}_\nu \in \mathbb{R}^{\mu \times \nu}$ are learned weights, $\mathrm{ReLU}$ is
+the element-wise activation, $\sigma^{+}$ is a sigmoid gate producing values in
+$(0,1)^{\mu}$, and $\odot$ broadcasts that gate over the $\mu$ rows of
+$\mathbf{W}_\nu \mathbf{V}$ (a Hadamard product). The map
+$\mathbf{W}_\nu \mathbf{V}$ is applied row-wise, so each output row is a linear
+combination of input 3-vectors. Under a rotation of the input vector channel
+$\mathbf{V} \mapsto \mathbf{R}\mathbf{V}$ (every row rotated) the gate is
+unchanged, because it depends only on the invariant scalars $\mathbf{s}$, and
+linearity gives $\mathbf{W}_\nu(\mathbf{R}\mathbf{V}) =
+\mathbf{R}(\mathbf{W}_\nu\mathbf{V})$; hence $\mathbf{V}' \mapsto
+\mathbf{R}\mathbf{V}'$, i.e. the vector channel is equivariant by
+(@eq-ch06-equivariance) and the scalar channel invariant. Keeping most
+parameters in the scalar channel is what makes GVP models compact, while the
+vector channel carries exactly the rotation-sensitive information. The form shown
+in @eq-ch06-gvp is a simplified exposition of the GVP: the full layer of Jing et
+al. (2021) also scales the vector channel by a normalisation term computed from
+the row-wise vector norms $\lVert\mathbf{V}\rVert_2$, which we omit here for
+clarity [@jing2021learning].
+
+## EGNN
+
+The E(n) Equivariant Graph Neural Network [@satorras2021n] achieves equivariance
+without higher-order tensors. Let $\mathbf{h}_i^{(l)} \in \mathbb{R}^{d}$ be the
+node scalar feature and $\mathbf{x}_i^{(l)} \in \mathbb{R}^3$ the node coordinate
+at layer $l$. Each layer forms an edge message from invariant quantities,
+
+$$ \mathbf{m}_{ij} = \phi_e\!\left(\mathbf{h}_i^{(l)}, \mathbf{h}_j^{(l)}, \lVert \mathbf{x}_i^{(l)} - \mathbf{x}_j^{(l)} \rVert_2^2, a_{ij}\right) $$ {#eq-ch06-egnn-message}
+
+with $\phi_e$ a learned function and $a_{ij}$ optional edge attributes, then
+updates coordinates and features,
+
+$$ \mathbf{x}_i^{(l+1)} = \mathbf{x}_i^{(l)} + c \sum_{j \neq i} \left(\mathbf{x}_i^{(l)} - \mathbf{x}_j^{(l)}\right) \phi_x(\mathbf{m}_{ij}), \qquad \mathbf{h}_i^{(l+1)} = \phi_h\!\left(\mathbf{h}_i^{(l)}, \sum_{j \neq i} \mathbf{m}_{ij}\right) $$ {#eq-ch06-egnn-update}
+
+where $\phi_x$ maps the message of (@eq-ch06-egnn-message) to a scalar weight
+and $c$ is a normalization constant (for example $c = 1/(N-1)$). The weight
+$\phi_x(\mathbf{m}_{ij})$ depends on coordinates only through the invariant
+distance $\lVert \mathbf{x}_i^{(l)} - \mathbf{x}_j^{(l)} \rVert_2^2$, and the
+displacement $(\mathbf{x}_i^{(l)} - \mathbf{x}_j^{(l)})$ is a difference of
+coordinates, so translation cancels. Substituting the rigid motion
+$\mathbf{x}_i^{(l)} \mapsto \mathbf{R}\mathbf{x}_i^{(l)} + \mathbf{t}$ therefore
+gives $\mathbf{x}_i^{(l+1)} \mapsto \mathbf{R}\mathbf{x}_i^{(l+1)} +
+\mathbf{t}$: the coordinate update is translation-invariant and
+rotation-equivariant, and the scalar features are invariant (@eq-ch06-invariance). EGNN needs no higher-order tensor features and has become a
+default geometry-aware backbone.
+
+## GearNet
+
+GearNet [@zhang2023protein] is a residue-level graph network that combines
+sequence edges, radius edges in 3D, and $k$-nearest-neighbor edges, with edge
+features restricted to distances and angles,
+
+$$ \mathbf{e}_{ij} = \left(\lVert \mathbf{x}_i - \mathbf{x}_j \rVert_2,\ \theta_{ijk}, \dots\right) $$ {#eq-ch06-gearnet-edge}
+
+where $\theta_{ijk}$ denotes a bond angle at a shared neighbor $k$. Every
+component of (@eq-ch06-gearnet-edge) is invariant under a rigid motion —
+distances by (@eq-ch06-distance-invariance), angles by
+(@eq-ch06-invariant-scalarization) — so the whole encoder is invariant by
+(@eq-ch06-invariance). Its emphasis is on **self-supervised pretraining**:
+multitask objectives such as masked residue prediction, distance and dihedral
+prediction, and contrastive learning across structure views. The result is a
+general-purpose structural representation that transfers to residue- and
+protein-level prediction tasks.
+
+## ProteinMPNN
+
+ProteinMPNN [@dauparas2022robust] is a message-passing network for **inverse
+folding** — predicting an amino-acid sequence that folds into a given backbone.
+Given the backbone graph $\mathcal{G}$ with coordinates $\mathbf{P}$, the model
+defines a conditional distribution over sequences
+$\mathbf{a} = (a_1, \dots, a_N) \in \mathcal{A}^N$, where $\mathcal{A}$ is the
+20-letter amino-acid alphabet ($|\mathcal{A}| = 20$), and is trained by teacher
+forcing to maximize the likelihood of the native sequence,
+
+$$ \mathcal{L}_{\mathrm{IF}}(\theta) = -\,\mathbb{E}_{\pi \sim \mathrm{Unif}(S_N)}\!\left[\sum_{i=1}^{N} \log p_\theta\!\left(a_{\pi(i)} \mid a_{\pi(<i)}, \mathcal{G}\right)\right] $$ {#eq-ch06-inverse-folding}
+
+where $\pi \in S_N$ is a decoding order drawn uniformly from the $N!$
+permutations, $a_{\pi(<i)} = (a_{\pi(1)}, \dots, a_{\pi(i-1)})$ is the
+already-decoded prefix, and $\theta$ collects the encoder and decoder
+parameters. The only geometric inputs to $p_\theta$ are invariant features —
+distances between backbone atoms and relative frames — so the likelihood inherits
+rotation and translation invariance,
+$p_\theta(\mathbf{a} \mid \mathbf{R}\mathbf{P} + \mathbf{1}_N\mathbf{t}^{\top})
+= p_\theta(\mathbf{a} \mid \mathbf{P})$ (@eq-ch06-invariance), and
+randomizing $\pi$ makes training order-agnostic. Despite its modest size it is a
+strong baseline [@dauparas2022robust], and its sequence-design success is direct
+evidence that a compact, geometry-aware embedding captures the chemistry of
+folding well enough to invert it.
+
+# Structure as a Teacher
+
+The most influential structures are now *predicted* rather than experimental.
+Prediction models expose internal representations that are themselves useful
+embeddings, and predicted structures serve as a vast training corpus.
+
+## AlphaFold2 and ESMFold representations
+
+AlphaFold2 [@jumper2021highly] represents a protein through an Evoformer over the
+multiple sequence alignment and a pair representation, then a structure module
+that applies **invariant point attention** to produce 3D coordinates. The
+structure module outputs coordinates $\hat{\mathbf{x}}_i$ that are equivariant to
+a global rigid motion,
+$\hat{\mathbf{x}}_i(\{\mathbf{R}\mathbf{x}_j + \mathbf{t}\}) =
+\mathbf{R}\,\hat{\mathbf{x}}_i(\{\mathbf{x}_j\}) + \mathbf{t}$
+(@eq-ch06-equivariance), while the single and pair representations are
+invariant; invariant point attention enforces this by weighting points through
+invariant distances expressed in local frames. The single and pair
+representations that precede the coordinates are rich summaries of sequence and
+co-evolutionary context, and they have been reused as features for downstream
+tasks. ESMFold [@lin2023evolutionary] removes the MSA requirement: it feeds
+embeddings from a large protein language model directly into a folding module,
+showing that the structure-relevant information already present in a sequence
+embedding can be decoded into coordinates without an explicit alignment.
+
+## Inverse folding and ESM-IF
+
+Inverse folding inverts the classical problem: given a backbone, what sequence
+fits it? ESM-IF [@hsu2022learning] trains a GVP-based encoder over the backbone
+together with an autoregressive sequence decoder on millions of AlphaFold-predicted
+structures. Its GVP encoder follows (@eq-ch06-gvp), so the backbone embedding
+is invariant to global rigid motion. The encoder's hidden states are a structure
+embedding learned under a strong, self-supervised-style signal (the sequence that
+generated the structure), and the model transfers to mutation-effect and
+sequence-design tasks. This is the clearest example of **structure as a
+teacher**: predicted structures provide the supervision that turns geometry into
+a transferable representation.
+
+# Fold Embeddings
+
+A second family of methods does not embed residues or atoms at all; it assigns a
+single vector to an entire structure or fold, optimizing for retrieval.
+
+## TM-vector
+
+TM-vec [@hamamsy2022tmvec] learns one vector per protein structure for fast
+homology detection and alignment. Its supervision derives from structural
+alignment quality — the TM-score produced by TM-align [@zhang2005tmalign] — so
+that structurally similar proteins land close together in the embedding space
+even when their sequences have diverged beyond recognition. Because the TM-score
+is computed after optimal superposition, the training signal carries no
+orientation information, and the encoder consumes invariant structural features;
+the learned per-structure vector is therefore invariant to rotation and
+translation (@tbl-equivariance). This deliberately targets the
+regime where sequence search fails, and the resulting vectors support approximate
+nearest-neighbor search over databases of millions of structures. TM-score and
+related superposition metrics are therefore both the evaluation target and the
+training signal.
+
+## Structural alphabets
+
+An alternative to real-valued embeddings is **discretization**. Foldseek
+[@vankempen2023foldseek] converts each residue's local backbone geometry into a
+small alphabet of structural states (3Di), turning a structure into a string over
+an alphabet of a few tens of symbols. That string is then searched with the same
+fast sequence-alignment machinery used for amino-acid sequences. Discretization
+trades resolution for speed and interoperability: one can index billions of
+structures with mature sequence-search infrastructure. The trade-off mirrors the
+fingerprint-versus-learned-embedding choice of Chapter 7 — compact and fast
+versus expressive and slow — and both are often used together, with the alphabet
+as a prefilter and a learned embedding or alignment as the reranker.
+
+# Linking Sequence and Structure Embeddings
+
+Sequence and structure embeddings are two views of one object, and the most
+useful representations exploit that relationship. Protein language models trained
+on sequence alone already encode structural information: probes of ESM-1b
+recover secondary structure and even residue contacts [@rives2021biological], and
+ESMFold shows that such embeddings can be decoded into coordinates
+[@lin2023evolutionary]. Conversely, structure-trained encoders such as ESM-IF
+and GearNet transfer to sequence-level and functional tasks
+[@hsu2022learning; @zhang2023protein].
+
+Two practical consequences follow. First, alignment between the two views can be
+learned explicitly: a model can be trained so that the sequence embedding of a
+protein and the structure embedding of the same protein are close, which is a
+contrastive, multimodal objective in the sense of Chapter 9. Second, because
+sequence embeddings are cheap and structure embeddings are expensive, a common
+recipe is to *distill* structure knowledge into a sequence model, obtaining
+structure-aware sequence embeddings at inference time without running a folding
+model. The open question throughout is what each view uniquely contributes:
+sequence embeddings carry evolutionary and mutational signal, structure
+embeddings carry the geometric constraints that evolution actually selected for,
+and neither is a complete substitute for the other [@zhang2023protein].
+
+::: {.callout-tip}
+## Key Takeaways
+- A structure embedding must be translation- and rotation-invariant, and
+  permutation-invariant; distance, angle, and frame features enforce this, while
+  raw coordinates do not.
+- Geometric networks split the problem into invariant scalars and equivariant
+  vectors or coordinates: GVP [@jing2021learning] gates vector channels,
+  EGNN [@satorras2021n] updates relative coordinates, and AlphaFold2
+  [@jumper2021highly] uses invariant point attention on local frames.
+- Residue-graph encoders (GearNet [@zhang2023protein]) and inverse-folding models
+  (ProteinMPNN [@dauparas2022robust], ESM-IF [@hsu2022learning]) are the
+  workhorses for transferable per-residue and per-protein representations.
+- Predicted structures have become the training corpus: ESMFold
+  [@lin2023evolutionary] and the millions of AlphaFold models behind ESM-IF show
+  that geometry can be learned at scale without waiting for experimental data.
+- Whole-fold embeddings range from continuous vectors, optimized against
+  alignment scores (TM-vec [@hamamsy2022tmvec]), to discrete structural
+  alphabets for fast search (Foldseek [@vankempen2023foldseek]).
+- Sequence and structure embeddings are complementary; probes
+  [@rives2021biological] and cross-view transfers are most effective when the two
+  are linked rather than treated as rivals.
+:::
+
+## Further Reading
+
+- Jing et al., *Learning from Protein Structure with Geometric Vector Perceptrons* (ICLR 2021) — the GVP architecture. <https://arxiv.org/abs/2009.01411>
+- Satorras et al., *E(n) Equivariant Graph Neural Networks* (ICML 2021) — the EGNN formulation. <https://arxiv.org/abs/2102.09844>
+- Zhang et al., *Protein Representation Learning by Geometric Structure Pretraining* (ICLR 2023) — GearNet. <https://arxiv.org/abs/2203.06125>
+- Dauparas et al., *Robust Deep Learning-based Protein Sequence Design using ProteinMPNN* (Science 2022) — inverse folding. <https://doi.org/10.1126/science.add2187>
+- Hsu et al., *Learning Inverse Folding from Millions of Predicted Structures* (ICML 2022) — ESM-IF. <https://doi.org/10.1101/2022.04.10.487779>
+- Jumper et al., *Highly Accurate Protein Structure Prediction with AlphaFold* (Nature 2021). <https://doi.org/10.1038/s41586-021-03819-2>

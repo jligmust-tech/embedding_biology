@@ -2,9 +2,387 @@
 title: "Molecular and Chemical Embeddings"
 ---
 
-::: {.callout-warning}
-**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 7*.
-Every named method must be cited to its primary source; keys must resolve in the bibliography.
+Small molecules are the other half of structural biology: drugs, metabolites,
+cofactors, and substrates. Their representations share a problem with proteins —
+the object is a graph, not a sequence — but the scales and constraints are
+different. A molecule has tens of atoms, not hundreds of residues; it is
+described by bonds and functional groups rather than a backbone; and its most
+important question is usually quantitative, "what is the property or activity?",
+rather than structural.
+
+This chapter traces the path from hand-crafted chemical fingerprints to learned
+molecular embeddings, and gives an explicit criterion for choosing between them
+on a given quantitative structure–property or structure–activity relationship
+(QSPR/QSAR) task.
+
+# Classical Fingerprints and Descriptors
+
+For decades, molecules have been encoded as fixed-length vectors by deterministic
+rules. These encodings remain strong baselines and are still widely used.
+
+## Extended-connectivity fingerprints (ECFP/Morgan)
+
+The extended-connectivity fingerprint (ECFP) [@rogers2010extended] is the
+dominant topological fingerprint. Give each atom $i$ an initial invariant integer
+label $\ell_i^{(0)}$ computed from local features (element, degree, charge,
+attached hydrogens, ring membership), and propagate labels around each atom for
+$R$ iterations,
+
+$$ \ell_i^{(r+1)} = h\!\left(\ell_i^{(r)}, \left\{\ell_j^{(r)} : j \in \mathcal{N}(i)\right\}\right), \qquad r = 0, \dots, R - 1 $$ {#eq-ch07-ecfp-label}
+
+where $\mathcal{N}(i)$ is the set of bonded neighbors of atom $i$ and $h$ is a
+deterministic hash that treats its second argument as an *unordered* multiset, so
+that the update does not depend on the order in which neighbors are listed. The
+widely used Morgan algorithm is a specific implementation of this scheme. For a
+molecule $M$, each identifier $(\ell_i^{(r)}, r)$ is then hashed into a fixed-length
+bit vector
+$\mathrm{ECFP}(M) \in \{0,1\}^{b}$ of length $b$ (commonly $1024$ or $2048$),
+
+$$ \mathrm{ECFP}(M) = \bigvee_{i,\, r} e_{\,h'(\ell_i^{(r)},\, r)} $$ {#eq-ch07-ecfp}
+
+where $h'$ maps an identifier to a bit index in $\{1, \dots, b\}$,
+$e_k \in \{0,1\}^b$ is the $k$-th standard basis vector (a 1 in position $k$),
+and $\bigvee$ is the bitwise OR over all identifiers.
+
+Two properties follow directly from (@eq-ch07-ecfp). First, a molecule with
+$n$ atoms generates at most $n(R+1)$ identifiers, so $\mathrm{ECFP}(M)$ has at
+most $n(R+1)$ set bits out of $b$; because $n(R+1) \ll b$ in practice the vector
+is **sparse and high-dimensional**. Second, because $h'$ maps an unbounded set of
+identifiers into only $b$ bins, distinct substructures *collide* whenever
+$h'(\ell, r) = h'(\ell', r')$; under a uniform hash the expected number of
+colliding identifier pairs is approximately $\binom{m}{2}/b$ for $m$ identifiers
+present, so increasing $b$ reduces collisions at linear memory cost while a small
+$b$ trades accuracy for a compact, cache-friendly vector. The fingerprint length
+is therefore a hyperparameter, not a consequence of chemistry: a collision is a
+tolerable loss for similarity search but a source of noise when the vector is
+used as a model input.
+
+ECFP is invariant by construction to atom numbering (@eq-ch07-ecfp-label uses
+unordered neighbor sets), and captures local substructure well, which is why it
+is a fixture in similarity search and virtual screening. Because ECFP vectors are
+binary and high-dimensional, they are compared with the Tanimoto coefficient
+rather than Euclidean distance. For $\mathbf{u}, \mathbf{v} \in \{0,1\}^{b}$ the
+Tanimoto coefficient is
+
+$$ T(\mathbf{u}, \mathbf{v}) = \frac{\langle \mathbf{u}, \mathbf{v} \rangle}{\lVert \mathbf{u} \rVert_1 + \lVert \mathbf{v} \rVert_1 - \langle \mathbf{u}, \mathbf{v} \rangle} \in [0, 1] $$ {#eq-ch07-tanimoto}
+
+where $\langle \mathbf{u}, \mathbf{v} \rangle$ counts shared set bits and
+$\lVert \mathbf{u} \rVert_1 + \lVert \mathbf{v} \rVert_1 - \langle \mathbf{u},
+\mathbf{v} \rangle$ counts the union of set bits; the coefficient $T$ of
+(@eq-ch07-tanimoto) is thus the fraction of substructures present in either
+molecule that are present in both, and a value near one indicates largely shared
+substructure.
+
+## MACCS keys
+
+The MACCS keys [@durant2002reoptimization] are a complementary, much smaller
+fingerprint: a fixed dictionary of a few hundred predefined substructural
+queries, each answered present or absent. Because the bits have human-assigned
+meanings, MACCS keys are more interpretable than hashed circular fingerprints,
+at the cost of covering far fewer substructures.
+
+## Physicochemical descriptors
+
+A third classical family is not a fingerprint at all but a vector of global
+physicochemical properties: molecular weight, lipophilicity (logP), polar surface
+area, counts of hydrogen-bond donors and acceptors, rotatable bonds, and so on.
+These descriptors are continuous, low-dimensional, and directly meaningful, but
+they discard most of the graph's topology.
+
+::: {.callout-note}
+## Definition
+A **molecular fingerprint** is a fixed-length vector computed from a molecule by a
+deterministic rule, with no parameters learned from data. A **learned molecular
+embedding** is a vector produced by a model (graph neural network or language
+model) whose parameters are optimized on a corpus of molecules and/or labels. The
+distinction is *not* sparse-versus-dense; it is rule-based versus learned, which
+drives everything about data requirements, transfer, and interpretability.
 :::
 
-TODO
+# String-Based Learned Embeddings
+
+## SMILES
+
+Many molecular models never look at the graph directly. Instead they read the
+molecule as a **SMILES** string, a linear textual encoding of the graph produced
+by a deterministic traversal [@weininger1988smiles]. SMILES turns chemistry into a
+language-modelling problem, letting sequence architectures be applied off the
+shelf. Its weakness is that a single molecule has many equivalent SMILES
+(different valid traversals), so the same graph maps to different strings; models
+must be trained to be robust to this, for example by enumeration.
+
+## Mol2Vec
+
+Mol2Vec [@jaeger2018mol2vec] applies the word2vec idea [@mikolov2013efficient]
+from Chapter 3 to chemistry: it treats substructures (Morgan-style atom
+environments) as "words" and molecules as "sentences", and learns a dense vector
+per substructure with skip-gram. A molecule embedding is then the sum of its substructure vectors. This
+is an *unsupervised, string- and substructure-based* embedding that can be
+computed without labels and used to warm-start property models.
+
+## ChemBERTa
+
+ChemBERTa [@chithrananda2020chemberta] is a transformer language model pretrained
+on large libraries of SMILES with masked-language-modeling, then fine-tuned for
+molecular property prediction. It demonstrated that standard masked pretraining
+on SMILES yields competitive property predictors, and it set the template for the
+many subsequent SMILES transformers.
+
+## MolBERT
+
+MolBERT [@fabian2020molbert] extends the pretraining recipe with
+*domain-relevant auxiliary tasks* — for example predicting molecular descriptors
+or graph-derived quantities alongside masked-token prediction — and with physical
+augmentations of the input. The auxiliary objectives inject chemical inductive
+bias that masked language modeling on SMILES alone lacks, improving robustness on
+downstream property benchmarks.
+
+# Graph Neural Networks for Molecules
+
+Reading a molecule as a string is convenient but throws away the graph structure
+and re-introduces the traversal-ambiguity problem. Graph neural networks operate
+on the molecule graph directly; the full path from molecule to graph to embedding
+is summarized in @fig-mol-graph.
+
+## Message passing
+
+The neural message-passing framework [@gilmer2017neural] defines a molecule as a
+graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ with atom features and bond
+features and computes each atom's embedding by iteratively aggregating messages
+from its bonded neighbors. With $\mathbf{h}_i^{(l)} \in \mathbb{R}^{d}$ the
+embedding of atom $i$ at layer $l$, $\mathbf{e}_{ij} \in \mathbb{R}^{d_e}$ the
+bond features of edge $(i, j)$, and $\mathcal{N}(i)$ the neighbor set,
+
+$$ \mathbf{h}_i^{(l+1)} = U\!\left(\mathbf{h}_i^{(l)},\ \bigoplus_{j \in \mathcal{N}(i)} \mathrm{Msg}\!\left(\mathbf{h}_i^{(l)}, \mathbf{h}_j^{(l)}, \mathbf{e}_{ij}\right)\right) $$ {#eq-ch07-mpnn}
+
+where $\mathrm{Msg}$ and $U$ are learned message and update functions and $\bigoplus$ is a
+permutation-invariant aggregator (sum, mean, or max). After $L$ rounds of
+(@eq-ch07-mpnn), a permutation-invariant readout collapses the atom
+embeddings into one molecule vector $\mathbf{z}_M \in \mathbb{R}^{d}$,
+
+$$ \mathbf{z}_M = R\!\left(\left\{\mathbf{h}_i^{(L)}\right\}_{i \in \mathcal{V}}\right), \qquad R\!\left(\left\{\mathbf{h}_{\pi(i)}\right\}_{i \in \mathcal{V}}\right) = R\!\left(\left\{\mathbf{h}_i\right\}_{i \in \mathcal{V}}\right) \ \ \text{for every permutation } \pi $$ {#eq-ch07-mol-readout}
+
+where $L$ is the number of layers and $R$ is sum, mean, or attention pooling.
+Because both $\bigoplus$ and $R$ are permutation-invariant, the molecule
+embedding does not depend on the arbitrary atom indexing used to build the graph
+— the molecular analogue of the residue-order independence of Chapter 6.
+
+## D-MPNN and Chemprop
+
+The directed message-passing neural network (D-MPNN) used by Chemprop
+[@yang2019analyzing] sends messages along *directed edges* rather than at atoms.
+Associate a hidden state $\mathbf{m}_{ij}^{(l)} \in \mathbb{R}^{d}$ with the
+directed edge $i \to j$, initialized from atom and bond features as
+$\mathbf{m}_{ij}^{(0)} = \sigma(\mathbf{W}_i [\mathbf{x}_i, \mathbf{e}_{ij}])$,
+and update it from the directed edges entering $i$ other than its reverse,
+
+$$ \mathbf{m}_{ij}^{(l+1)} = U\!\left(\mathbf{m}_{ij}^{(0)},\ \bigoplus_{k \in \mathcal{N}(i) \setminus \{j\}} \mathrm{Msg}\!\left(\mathbf{m}_{ki}^{(l)}\right)\right) $$ {#eq-ch07-dmpnn}
+
+and read out an atom embedding by pooling its incoming directed edges,
+$\mathbf{h}_j = \sigma(\mathbf{W}_o [\mathbf{x}_j, \sum_{i \in \mathcal{N}(j)}
+\mathbf{m}_{ij}^{(L)}])$. The exclusion $k \neq j$ in (@eq-ch07-dmpnn)
+removes the reverse edge $j \to i$ from the aggregation, so a message cannot be
+echoed straight back along the bond it arrived on; this refinement reduces
+redundant propagation and is why D-MPNN became a standard baseline. Chemprop
+showed that a carefully tuned D-MPNN matches or exceeds prior learned and
+fingerprint-based models on many QSPR benchmarks, although the size of the
+advantage depends on the dataset and target [@yang2019analyzing]; it is a
+standard baseline for molecular property prediction.
+
+## GIN
+
+The graph isomorphism network (GIN) [@xu2019powerful] is notable for its
+*theoretical* grounding: with an injective aggregation function and sufficient
+depth, it is as discriminative as the Weisfeiler–Lehman graph-isomorphism test.
+This makes GIN a principled choice when distinguishing similar substructures
+matters, and it is a common backbone in molecular benchmarks.
+
+## AttentiveFP
+
+AttentiveFP [@xiong2020pushing] adds a graph attention mechanism with both atom-
+and bond-level attention, allowing the model to weight the neighbors that matter
+for a property rather than pooling them uniformly. Attention weights also provide
+a crude form of interpretability, in that they can be inspected for
+chemically salient substructures (with the usual caveats about attention as
+explanation; see Chapter 12).
+
+# Pretraining Strategies for Molecular Language Models
+
+Learned molecular embeddings are only as good as their pretraining. Three ideas
+recur.
+
+::: {.callout-note}
+## Definition
+**Masked atom modeling** is the molecular analogue of masked-token pretraining:
+a fraction of atoms (and/or bonds, or SMILES tokens) is hidden and the model must
+reconstruct them from context. Because the reconstruction target encodes local
+chemistry, the resulting embeddings encode functional-group and scaffold
+regularity without any labeled property.
+:::
+
+First, **masked atom or masked token modeling**, as in ChemBERTa
+[@chithrananda2020chemberta], learns from unlabeled molecule libraries at scale.
+Second, **auxiliary self-supervised tasks** — predicting distances, bond
+properties, or global descriptors — supply the chemical inductive bias that pure
+masked modeling lacks, an approach formalized by MolBERT [@fabian2020molbert] and
+central to structure-aware pretraining. Third, **contrastive learning**
+[@chen2020simple], where two augmented views of the same molecule are pulled
+together and different molecules pushed apart, is used to pretrain encoders that
+transfer without labels. In all three cases the pretrained representation is
+evaluated by linear probing or fine-tuning, exactly as for sequence models
+(Chapter 5).
+
+# Conformers and 3D-Aware Models
+
+A molecule is a 3D object, and many properties — reactivity, binding, and
+especially quantum-chemical targets — depend on geometry, not just connectivity.
+A **conformer** is one 3D arrangement of the atoms; a molecule may have many.
+
+## SchNet and DimeNet
+
+SchNet [@schutt2017schnet] introduced continuous-filter convolutions over atom
+positions, making the model sensitive to interatomic distances while remaining
+invariant to rotation and translation. DimeNet [@gasteiger2020dimenet] added
+*directional* messages: instead of using distances alone, it encodes angles
+between bonds, which resolves configurations that distance-only models conflate.
+
+## GemNet
+
+GemNet [@gasteiger2021gemnet] generalizes directional message passing to
+two-hop interactions and four-body (dihedral) terms, so that the representation
+depends on the relative orientation of two bonds, not just their lengths and
+angles. This is the geometry needed for accurate molecular simulation and
+reaction modelling.
+
+## Uni-Mol
+
+Uni-Mol [@zhou2023unimol] is a pretrained, 3D-aware molecular representation: it
+consumes atoms with coordinates and learns both atom-level and pair-level
+embeddings, pretrained with masked-atom and coordinate-denoising objectives on
+large conformer datasets. It shows that a single pretrained 3D encoder transfers
+across property, docking, and conformer-generation tasks, the molecular
+counterpart of a structure-based foundation model (Chapter 13).
+
+These 3D models share one invariance. Their features are functions of pairwise
+distances $\lVert \mathbf{x}_a - \mathbf{x}_b \rVert_2$, bond angles, and
+dihedrals, all of which are invariant under a rigid motion, so a global rotation
+$\mathbf{x}_a \mapsto \mathbf{R}\mathbf{x}_a + \mathbf{t}$ (with
+$\mathbf{R} \in SO(3)$, $\mathbf{t} \in \mathbb{R}^3$) leaves the learned
+per-atom and per-molecule representations unchanged. The graph-only models of the
+previous section are invariant to *permutation* by (@eq-ch07-mol-readout) but
+blind to geometry; the 3D models replace the explicit bond graph with
+geometry-derived features and so add E(3)-invariance of the conformation to the
+permutation invariance they already have.
+
+# Property and Activity Prediction
+
+The practically important output of all this machinery is a molecule embedding
+that feeds a downstream head for a task: predicting a continuous property
+(logP, solubility, toxicity) is **QSPR**; predicting a biological activity or
+binding label is **QSAR**. Formally, a molecular encoder $\mathrm{Enc}_\theta$
+maps a molecule $M$ to an embedding
+$\mathbf{z}_M = \mathrm{Enc}_\theta(M) \in \mathbb{R}^{d}$, and a prediction head
+$g_\phi$ is fit together with the encoder by minimizing an empirical risk over a
+labeled dataset $\mathcal{D} = \{(M, y_M)\}$,
+
+$$ \min_{\theta, \phi}\ \frac{1}{|\mathcal{D}|} \sum_{(M, y_M) \in \mathcal{D}} \ell\!\left(g_\phi(\mathbf{z}_M),\ y_M\right) $$ {#eq-ch07-mol-prediction}
+
+where $\ell$ is the loss and the minimization is over the encoder parameters
+$\theta$ and head parameters $\phi$. For a continuous property (QSPR), $\ell$ is
+the squared error $\lVert g_\phi(\mathbf{z}_M) - y_M \rVert_2^2$; for a binary
+activity label (QSAR), it is the cross-entropy
+$-[y_M \log \hat{y}_M + (1 - y_M)\log(1 - \hat{y}_M)]$ with
+$\hat{y}_M = \operatorname{sigmoid}(g_\phi(\mathbf{z}_M))$. For a classical
+fingerprint the encoder has no learned parameters ($\theta = \varnothing$) and
+only the head is trained, which is why fingerprints are usable in the low-data
+regime; for a learned encoder the gradient also updates $\theta$ in
+(@eq-ch07-mol-prediction), which is what makes pretraining transferable but raises the
+data requirement. The recurring empirical findings are:
+
+- On small, homogeneous, well-split datasets, classical fingerprints combined
+  with gradient-boosted trees or random forests remain extremely competitive, and
+  are far cheaper [@rogers2010extended; @yang2019analyzing].
+- Learned graph and SMILES embeddings win when data are plentiful or when
+  pretraining transfers from related tasks, and when the target depends on
+  geometry rather than 2D topology [@yang2019analyzing; @zhou2023unimol].
+- The split matters more than the model. Random splits can substantially
+  overstate performance relative to *scaffold* splits, which hold out whole
+  chemical scaffolds [@bemis1996properties; @chuang2018adversarial]; the leakage
+  pitfalls of Chapter 11 apply with particular force here.
+
+In practice a molecule is rarely predicted once. Modern pipelines attach several
+heads to a shared embedding (multi-task learning), which shares statistical
+strength across related endpoints and is a central draw of a learned
+representation: one embedding can serve logP, solubility, and activity models at
+once. Learned embeddings also admit uncertainty estimates, through ensembling or
+a probabilistic head, whereas a fingerprint gives no such signal. The practical
+recommendation is therefore not "learned always wins" but a decision governed by
+data volume, the relevance of 3D geometry to the target, and whether the same
+molecule must serve many endpoints.
+
+@tbl-fingerprint-learned summarizes the trade-offs that determine the
+choice.
+
+| Criterion | Classical fingerprints / descriptors | Learned embeddings |
+|:--|:--|:--|
+| How computed | deterministic rule, no training | trained GNN or language model |
+| Dimensionality | fixed, often sparse (hundreds–thousands of bits) | dense, typically 64–1024 |
+| Data required | works with very few labels | benefits from large pretraining corpora |
+| Transfer to new tasks | weak; recompute per task | strong with pretraining + fine-tuning |
+| Uses 3D geometry | no (2D topology) | yes for conformer-aware models |
+| Interpretability | substructure bits largely human-readable | low; requires probing |
+| Compute cost | negligible | training/inference cost |
+| Typical strength | similarity search, low-data baselines | large-data QSPR/QSAR, 3D-dependent targets |
+
+: Fingerprints versus learned embeddings. The choice is governed by data volume,
+whether 3D geometry matters, and how much interpretability is required — not by
+which method is newer. {#tbl-fingerprint-learned}
+
+::: {#fig-mol-graph}
+```{mermaid}
+flowchart LR
+  A["SMILES / 2D depiction"] --> B["Atoms + bonds"]
+  B --> C["Molecule graph<br/>node features: element, charge, degree, ring<br/>edge features: bond order, ring, stereo"]
+  C --> D["GNN message passing<br/>(L layers, e.g. MPNN, D-MPNN, GIN)"]
+  D --> E["Atom embeddings"]
+  E --> F["Readout / pooling<br/>(sum, mean, attention)"]
+  F --> G["Molecule embedding"]
+  G --> H["Property head<br/>(QSPR / QSAR)"]
+  C -.->|"3D conformer (optional)"| D
+```
+
+From molecule to graph to embedding. A molecular structure is parsed into a graph with atom and bond features; a message-passing network produces per-atom embeddings, which a permutation-invariant readout pools into a single molecule vector used by a property head. The dashed path shows optional 3D conformer information feeding the network, as in SchNet, DimeNet, GemNet, and Uni-Mol.
+:::
+
+::: {.callout-tip}
+## Key Takeaways
+- Fingerprints such as ECFP [@rogers2010extended] and MACCS
+  [@durant2002reoptimization] are deterministic, need no training, and remain
+  strong low-data and similarity-search baselines; learned embeddings win when
+  data or geometry demand it.
+- SMILES [@weininger1988smiles] turns chemistry into a language task, enabling
+  word2vec-style and transformer methods (Mol2Vec [@jaeger2018mol2vec],
+  ChemBERTa [@chithrananda2020chemberta], MolBERT [@fabian2020molbert]), at the
+  cost of traversal ambiguity.
+- Message-passing GNNs operate on the graph directly: MPNN [@gilmer2017neural]
+  sets the framework, D-MPNN/Chemprop [@yang2019analyzing] is the standard
+  baseline, GIN [@xu2019powerful] adds expressiveness guarantees, and AttentiveFP
+  [@xiong2020pushing] adds attention.
+- Pretraining (masked atom modeling, auxiliary tasks, contrastive objectives)
+  is what makes learned molecular embeddings transfer; without it, fingerprints
+  are often preferable.
+- 3D-aware models — SchNet [@schutt2017schnet], DimeNet [@gasteiger2020dimenet],
+  GemNet [@gasteiger2021gemnet], Uni-Mol [@zhou2023unimol] — are required when
+  the target depends on conformation rather than 2D topology.
+- Splitting strategy, not architecture, is the dominant source of error in
+  QSPR/QSAR; use scaffold splits (Chapter 11).
+:::
+
+## Further Reading
+
+- Rogers and Hahn, *Extended-Connectivity Fingerprints* (J. Chem. Inf. Model. 2010) — ECFP/Morgan. <https://doi.org/10.1021/ci100050t>
+- Jaeger et al., *Mol2vec: Unsupervised Machine Learning Approach with Chemical Intuition* (J. Chem. Inf. Model. 2018). <https://doi.org/10.1021/acs.jcim.7b00616>
+- Yang et al., *Analyzing Learned Molecular Representations for Property Prediction* (J. Chem. Inf. Model. 2019) — Chemprop and D-MPNN. <https://doi.org/10.1021/acs.jcim.9b00237>
+- Xiong et al., *Pushing the Boundaries of Molecular Representation ... Graph Attention Mechanism* (J. Med. Chem. 2020) — AttentiveFP. <https://doi.org/10.1021/acs.jmedchem.9b00959>
+- Zhou et al., *Uni-Mol: A Universal 3D Molecular Representation Learning Framework* (ICLR 2023). <https://doi.org/10.26434/chemrxiv-2022-jjm0j>
+- Gasteiger et al., *GemNet: Universal Directional Graph Neural Networks for Molecules* (NeurIPS 2021). <https://arxiv.org/abs/2106.08903>
