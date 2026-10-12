@@ -1,0 +1,10 @@
+---
+title: "Applications and Case Studies"
+---
+
+::: {.callout-warning}
+**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 14*.
+Every named method must be cited to its primary source; keys must resolve in the bibliography.
+:::
+
+TODO

@@ -1,0 +1,23 @@
+# Quarto / book build artifacts
+_book/
+.quarto/
+*_cache/
+*.html
+!index.html
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+.Rproj.user/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local bib fragments are tracked on purpose; ignore nothing else here
+
+/.quarto/
+**/*.quarto_ipynb

@@ -1,0 +1,43 @@
+---
+title: "Preface"
+---
+
+::: {.callout-note}
+**Status.** This book is being written in public. The outline and per-section
+requirements live in [Outline and Writing Requirements](outline.qmd) and are
+committed before the chapters on purpose, so that the structure can be audited
+and corrected cheaply. Chapters below are filled in incrementally.
+:::
+
+Biology has become a data science. The central difficulty is rarely a shortage of
+data — it is that biological data arrives as sequences, structures, images,
+counts, and graphs that do not live in a common numerical space. **Embeddings**
+are the bridge: they map biological entities into vectors whose geometry is meant
+to encode biological meaning, so that a distance, a dot product, or a linear
+probe becomes a meaningful operation.
+
+## What this book covers
+
+The book is organized into three parts:
+
+1. **Foundations** — why representation learning matters in biology, the
+   mathematical toolkit, and the objectives used to learn embeddings.
+2. **Biological modalities** — DNA/RNA, protein sequence, protein structure,
+   small molecules, single cells, multi-omics/multimodal data, and graphs.
+3. **Practice** — evaluation and pitfalls, interpretability and visualization,
+   foundation models, and end-to-end applications.
+
+## How to read it
+
+Each chapter is self-contained and states a definition for every central term.
+Every named method is cited to its primary source; the bibliography is kept in
+`references.bib` and cited with Pandoc `[@key]` syntax. If you find a claim
+without a citation, or a citation that does not support its claim, please
+open an issue — accuracy of references is an explicit requirement of this book.
+
+## Conventions
+
+- Notation follows [Appendix A](chapters/appendix-a-math.qmd).
+- Code is illustrative and kept short.
+- Callouts titled *Definition* give the working meaning of a term;
+  *Key Takeaways* close each chapter; *Further Reading* points to deeper sources.

@@ -1,0 +1,10 @@
+---
+title: "Single-Cell Embeddings"
+---
+
+::: {.callout-warning}
+**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Chapter 8*.
+Every named method must be cited to its primary source; keys must resolve in the bibliography.
+:::
+
+TODO

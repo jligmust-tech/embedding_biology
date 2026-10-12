@@ -1,0 +1,26 @@
+/*-- scss:defaults --*/
+
+$primary: #2a9d8f;
+$link-color: #1b4965;
+
+/*-- scss:rules --*/
+
+.quarto-title-block .quarto-title-banner {
+  background-image: linear-gradient(135deg, #1b4965 0%, #2a9d8f 100%);
+}
+
+.callout.callout-style-default.callout-note {
+  border-left-color: #2a9d8f;
+}
+
+code {
+  font-size: 0.85em;
+}
+
+table {
+  font-size: 0.9em;
+}
+
+.sidebar-title {
+  font-weight: 600;
+}

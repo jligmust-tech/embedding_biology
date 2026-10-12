@@ -1,0 +1,67 @@
+project:
+  type: book
+  output-dir: _book
+  resources:
+    - figures/
+
+book:
+  title: "Embeddings in Biology"
+  subtitle: "A Practical Guide to Representation Learning for Biological Data"
+  author: "jligmust-tech"
+  date: "2026-10-12"
+  repo-url: https://github.com/jligmust-tech/embedding_biology
+  repo-actions: [edit, issue]
+  sharing: [twitter, linkedin]
+  search: true
+  page-navigation: true
+  chapters:
+    - index.qmd
+    - part: "Part I — Foundations"
+      chapters:
+        - chapters/01-why-embeddings.qmd
+        - chapters/02-math-foundations.qmd
+        - chapters/03-learning-embeddings.qmd
+    - part: "Part II — Biological Modalities"
+      chapters:
+        - chapters/04-dna-rna.qmd
+        - chapters/05-proteins-sequence.qmd
+        - chapters/06-protein-structure.qmd
+        - chapters/07-molecules-chemistry.qmd
+        - chapters/08-single-cell.qmd
+        - chapters/09-multiomics-multimodal.qmd
+        - chapters/10-graphs-knowledge.qmd
+    - part: "Part III — Practice"
+      chapters:
+        - chapters/11-evaluation-pitfalls.qmd
+        - chapters/12-interpretability-visualization.qmd
+        - chapters/13-foundation-models.qmd
+        - chapters/14-applications.qmd
+  appendices:
+    - chapters/appendix-a-math.qmd
+    - chapters/appendix-b-tools-data.qmd
+    - chapters/appendix-c-glossary.qmd
+    - outline.qmd
+
+bibliography: references.bib
+csl: https://www.zotero.org/styles/nature
+
+format:
+  html:
+    theme:
+      - cosmo
+      - styles.css
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    citations-hover: true
+    footnotes-hover: true
+    code-fold: true
+    code-summary: "Show code"
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    link-external-newwindow: true
+
+execute:
+  freeze: auto
+  warning: false
+  message: false

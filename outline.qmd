@@ -1,0 +1,408 @@
+---
+title: "Outline and Writing Requirements"
+---
+
+This document is the master plan for the book. It is intentionally committed **before**
+the chapters so the structure and the acceptance criteria for every section can be
+audited and amended cheaply. Each chapter is then written by a dedicated writer
+against the requirements stated here, and later verified for citation accuracy.
+
+## Scope and audience
+
+**Subject.** How biological entities — DNA/RNA sequences, proteins, protein
+structures, small molecules, cells, and biological networks — are turned into
+vector representations ("embeddings"), and how those representations are used,
+evaluated, and interpreted.
+
+**Reader.** Computational biologists, bioinformaticians, and ML practitioners who
+know some biology and some machine learning and want a single, coherent, citation-
+backed treatment that connects the two.
+
+**Non-goals.** This is not a textbook on deep learning theory, nor a tools manual.
+Where a method matters we state *what it does, why it works, when it fails*, and
+cite the primary source instead of re-deriving it.
+
+## Conventions (apply to every chapter)
+
+- Language: English, present tense, third person, no marketing tone.
+- Every factual claim about a named method gets a citation to the **primary
+  source** (the original paper), not a blog post or a review, unless a review is
+  explicitly the subject.
+- Definitions box for each central term: a `::: {.callout-note}` titled
+  "Definition".
+- Every chapter ends with a **Key Takeaways** callout (3–6 bullets) and a
+  **Further Reading** list (3–6 entries with links/DOIs).
+- Use `[@key]` Pandoc citation syntax; every key MUST exist in `references.bib`.
+  Never invent a BibTeX entry. If the citation cannot be verified, omit it and
+  write the claim without an attribution.
+- Math in `$...$`/`$$...$$` (MathJax). Keep notation consistent with Appendix A.
+- Code blocks are illustrative and short (≤ ~20 lines), language-tagged, and
+  must be runnable in principle.
+- Target length per chapter: **2,000–3,500 words** of body text.
+
+## Acceptance criteria ("definition of done") for a chapter
+
+1. All required subsections are present and in order.
+2. Every named method/model is cited to its primary source in `references.bib`.
+3. At least one figure or table per major subsection group (may be a described
+   diagram, a comparison table, or a rendered figure).
+4. `quarto render` succeeds with **no broken citation keys** and no undefined
+   cross-references.
+5. Key Takeaways + Further Reading present.
+6. No fabricated numbers; any quantitative claim is either cited or explicitly
+   labelled as illustrative.
+
+---
+
+# Part I — Foundations
+
+## Chapter 1 — Why Embeddings for Biology?
+*File:* `chapters/01-why-embeddings.qmd`
+
+**Purpose.** Motivate representation learning for biological data and set up the
+vocabulary used throughout the book.
+
+**Required sections**
+1. The representation problem in biology (heterogeneous, high-dimensional,
+   noisy, structured data).
+2. From hand-crafted features to learned representations (one-hot, k-mers,
+   physicochemical descriptors → learned vectors).
+3. What makes biology different: sequence vs. structure, sparsity, batch
+   effects, evolutionary signal, small labeled datasets.
+4. Types of embeddings (feature, contextual, structural, joint/multimodal) and
+   a unifying notation table.
+5. A map of the book (how Parts I–III fit together).
+
+**Required artifacts.** One table classifying embedding types by input modality;
+one "taxonomy of biological data" figure (described or drawn).
+
+**Key citations.** Bengio et al. representation learning; Mikolov word2vec;
+Alley et al. Unified Rational Protein Features; Jumper et al. AlphaFold (as a
+motivating structural example).
+
+**Done when.** A reader who stops here can state why learned embeddings are
+useful and can name the modalities covered later.
+
+## Chapter 2 — Mathematical Foundations of Representation Learning
+*File:* `chapters/02-math-foundations.qmd`
+
+**Purpose.** Give the minimum mathematical toolkit: vectors, similarity,
+distances, manifolds, and dimensionality reduction.
+
+**Required sections**
+1. Vectors, norms, dot products, cosine similarity, and when each is appropriate.
+2. Distance metrics for biological data (Euclidean, cosine, Mahalanobis,
+   edit/alignment distances as non-Euclidean examples).
+3. Curse of dimensionality and the manifold hypothesis in biology.
+4. Dimensionality reduction: PCA, t-SNE, UMAP — what each preserves and the
+   common misinterpretations.
+5. Embedding spaces: linear structure, anisotropy, alignment (Procrustes,
+   orthogonal Procrustes), and analogy operations.
+
+**Required artifacts.** A metric cheat-sheet table; a figure (described)
+contrasting what PCA/t-SNE/UMAP preserve.
+
+**Key citations.** Pearson PCA; van der Maaten & Hinton t-SNE; McInnes et al.
+UMAP; Smith et al. (UMAP pitfalls); Mikolov analogy arithmetic.
+
+**Done when.** Notation matches Appendix A and every metric is defined formally.
+
+## Chapter 3 — Learning Embeddings: from PCA to Deep Networks
+*File:* `chapters/03-learning-embeddings.qmd`
+
+**Purpose.** Explain how embeddings are *learned*: objectives and architectures.
+
+**Required sections**
+1. Matrix factorization and spectral methods (PCA/SVD, LSA, spectral embedding).
+2. Shallow prediction methods (word2vec SGNS/CBOW, GloVe, node2vec).
+3. Autoencoders and VAEs (reconstruction, variational objective, latent space).
+4. Contrastive and metric learning (InfoNCE, triplet loss, SimCLR) and why it
+   dominates biological foundation models.
+5. Self-supervised pretraining then fine-tuning vs. linear probing.
+6. Masked-language-modeling in the biological sequence setting.
+
+**Required artifacts.** Objective-function table (method → loss → what it
+optimizes); a figure showing the pretrain→probe/finetune pipeline.
+
+**Key citations.** Mikolov word2vec; Pennington GloVe; Kingma & Welling VAE;
+van den Oord CPC/InfoNCE; Chen et al. SimCLR; Devlin BERT; Hamilton GraphSAGE.
+
+**Done when.** Each objective is stated as an equation with its variables defined.
+
+---
+
+# Part II — Biological Modalities
+
+## Chapter 4 — DNA and RNA Sequence Embeddings
+*File:* `chapters/04-dna-rna.qmd`
+
+**Purpose.** Cover representations of nucleotide sequences.
+
+**Required sections**
+1. Classical encodings: one-hot, k-mer counts, k-mer hashing, mismatch kernels.
+2. Unsupervised sequence vectors: dna2vec / k-mer embeddings.
+3. Supervised CNNs and the regulatory-genome era (DeepSEA, Basset).
+4. Transformer language models: DNABERT, DNABERT-2, Nucleotide Transformer,
+   HyenaDNA, Evo.
+5. RNA-specific embeddings: RNA-FM and structure-aware models.
+6. Practicalities: sequence length limits, tokenization schemes (k-mer vs. BPE
+   vs. single nucleotide), reverse-complement equivariance.
+
+**Required artifacts.** Model comparison table (model, tokenizer, max length,
+pretraining corpus, params); a diagram of k-mer tokenization vs. BPE.
+
+**Key citations.** Alipanahi DeepSEA; Kelley Basset; Ji DNABERT; Zhou DNABERT-2;
+Dalla-Torre Nucleotide Transformer; Nguyen HyenaDNA; Chen RNA-FM.
+
+**Done when.** The tokenization/context-length trade-offs are explicit.
+
+## Chapter 5 — Protein Sequence Embeddings
+*File:* `chapters/05-proteins-sequence.qmd`
+
+**Purpose.** Representations of amino-acid sequences, the crown jewel of
+biological embeddings.
+
+**Required sections**
+1. Classical features: k-mer/PSSM, HMM profiles, physicochemical scales.
+2. Unsupervised protein vectors: ProtVec, UniRep.
+3. Supervised/transfer baselines: TAPE benchmarks.
+4. Protein language models: ProtBERT/ProtBERT-BFD, ESM-1b, ESM-2, ESMFold
+   (embedding angle), ProtT5, Ankh.
+5. What the representations encode: structure, function, mutational effects;
+   probing studies.
+6. Practicalities: MSAs vs. single-sequence models, scaling laws, compute.
+
+**Required artifacts.** PLM comparison table; a figure of the embedding →
+downstream-task transfer pipeline.
+
+**Key citations.** Asgari ProtVec; Alley UniRep; Rao TAPE; Elnaggar ProtTrans/
+ProtBERT/ProtT5; Rives ESM-1b; Lin ESM-2; Ahdritz OpenFold; Elnaggar Ankh;
+Brandes et al. (what PLMs learn).
+
+**Done when.** The MSA-based vs. single-sequence distinction is clear and cited.
+
+## Chapter 6 — Protein Structure Embeddings
+*File:* `chapters/06-protein-structure.qmd`
+
+**Purpose.** Embeddings of 3D structure and structure-aware representations.
+
+**Required sections**
+1. Representing structure: coordinates, distance matrices, contact maps, graphs.
+2. Invariance/equivariance: rotation, translation, permutation.
+3. GNN and geometric methods: GVP-GNN, EGNN, GearNet, ProteinMPNN.
+4. Structure as a teacher: AlphaFold/ESMFold representations and their use as
+   features; inverse folding (ESM-IF).
+5. Fold embeddings: TM-vector and structural-alphabet approaches.
+6. Linking sequence and structure embeddings.
+
+**Required artifacts.** Equivariance/invariance table; a figure contrasting
+coordinate vs. graph representations.
+
+**Key citations.** Jing GVP-GNN; Satorras EGNN; Zhang GearNet; Dauparas
+ProteinMPNN; Hsu TM-vec; Hsu ESM-IF; Jumper AlphaFold2; Zhang et al. structure
+vs. sequence representations.
+
+**Done when.** The invariance requirements of each architecture are stated.
+
+## Chapter 7 — Molecular and Chemical Embeddings
+*File:* `chapters/07-molecules-chemistry.qmd`
+
+**Purpose.** Representations of small molecules.
+
+**Required sections**
+1. Classical fingerprints (ECFP/Morgan, MACCS) and physicochemical descriptors.
+2. String-based learned embeddings: SMILES, Mol2Vec, ChemBERTa, MolBERT.
+3. Graph neural networks for molecules (MPNN, D-MPNN, GIN, AttentiveFP).
+4. Pretraining strategies for molecular LMs (masked atom modeling).
+5. Conformers and 3D-aware models (GemNet, Uni-Mol).
+6. Property/activity prediction and the role of embeddings.
+
+**Required artifacts.** Fingerprint vs. learned-embedding comparison table;
+molecule→graph→embedding figure.
+
+**Key citations.** Rogers & Hahn ECFP; Jaeger Mol2Vec; Chithrananda ChemBERTa;
+Gilmer MPNN; Yang Chemprop D-MPNN; Yang Uni-Mol; Zhou Uni-Mol (3D).
+
+**Done when.** The reader can choose between fingerprints and learned embeddings
+for a given QSAR/QSPR task.
+
+## Chapter 8 — Single-Cell Embeddings
+*File:* `chapters/08-single-cell.qmd`
+
+**Purpose.** Embeddings of cells and genes from single-cell omics.
+
+**Required sections**
+1. The data: count matrices, sparsity, dropout, library size.
+2. Classical pipelines: normalization, HVG selection, PCA, neighborhood graphs,
+   UMAP/t-SNE visualization.
+3. Probabilistic latent models: scVI, scANVI, totalVI, and batch correction.
+4. Cell foundation models: scBERT, Geneformer, scGPT, scFoundation.
+5. Gene embeddings and transfer learning across datasets.
+6. Evaluation: integration metrics (kBET, LISI), and why UMAP is not a
+   quantitative benchmark.
+
+**Required artifacts.** Integration-metrics table; a diagram of the standard
+scRNA-seq latent-variable pipeline.
+
+**Key citations.** Lopez scVI; Wolf Scanpy; Luecken benchmarking; Yang scBERT;
+Theodoris Geneformer; Cui scGPT; Hao Seurat; Luecken/LISI/kBET.
+
+**Done when.** Batch-effect handling and evaluation caveats are explicit.
+
+## Chapter 9 — Multi-Omics and Multimodal Integration
+*File:* `chapters/09-multiomics-multimodal.qmd`
+
+**Purpose.** Joint embeddings across modalities.
+
+**Required sections**
+1. The integration problem: shared vs. modality-specific factors.
+2. Early/intermediate/late fusion and shared-latent-space models (MOFA,
+   MultiVI, Cobolt).
+3. Contrastive multimodal alignment: CLIP-style objectives in biology
+   (sequence–structure, image–omics).
+4. Translation between modalities (e.g., image→expression, sequence→structure).
+5. Missing modalities and partial observability.
+6. Case study: spatial transcriptomics embeddings.
+
+**Required artifacts.** Fusion-strategy comparison table; a shared-latent-space
+figure.
+
+**Key citations.** Argelaguet MOFA+; Gayoso MultiVI; Gong Cobolt; Radford CLIP;
+Ashuach MultiVI; spatial methods (Tangram, SpaGCN).
+
+**Done when.** The trade-off between alignment and modality-specific
+information is quantified conceptually.
+
+## Chapter 10 — Graphs, Networks, and Knowledge-Graph Embeddings
+*File:* `chapters/10-graphs-knowledge.qmd`
+
+**Purpose.** Embeddings of relational biological data.
+
+**Required sections**
+1. Biological graphs: PPI, regulatory, metabolic, gene–disease.
+2. Shallow node embeddings: DeepWalk, node2vec, LINE.
+3. Graph neural networks: GCN, GraphSAGE, GAT, message passing.
+4. Knowledge-graph embeddings: TransE, RotatE, ComplEx and link prediction.
+5. Applications: drug repurposing, target identification, function prediction.
+6. Heterogeneity and scale.
+
+**Required artifacts.** GNN layer variants table; a KG link-prediction figure.
+
+**Key citations.** Perozzi DeepWalk; Grover node2vec; Tang LINE; Kipf GCN;
+Hamilton GraphSAGE; Veličković GAT; Bordes TransE; Sun RotatE; Trouillon
+ComplEx.
+
+**Done when.** Node vs. edge vs. KG prediction tasks are distinguished.
+
+---
+
+# Part III — Practice
+
+## Chapter 11 — Evaluation, Benchmarks, and Pitfalls
+*File:* `chapters/11-evaluation-pitfalls.qmd`
+
+**Purpose.** How to know whether an embedding is good — and the traps.
+
+**Required sections**
+1. Evaluating embeddings: linear probing, fine-tuning, k-NN, clustering,
+   supervised heads.
+2. Benchmarks: TAPE (proteins), BEND (DNA), scientific/omics benchmarks.
+3. Data leakage: train/test homology, duplicate sequences, scaffold splits,
+   time splits.
+4. Distribution shift: new families, batch effects, organism transfer.
+5. Metrics: AUROC/AUPRC, calibration, retrieval metrics, and their caveats.
+6. Reproducibility and reporting checklist.
+
+**Required artifacts.** Pitfall → detection → mitigation table; an evaluation
+protocol decision flow.
+
+**Key citations.** Rao TAPE; Dalla-Torre BEND; Whalen (homology leakage);
+Bernett (leakage in bio); Luecken benchmarking; Chuang (splitting).
+
+**Done when.** A reader can design a leak-free evaluation for a new embedding.
+
+## Chapter 12 — Interpretability and Visualization
+*File:* `chapters/12-interpretability-visualization.qmd`
+
+**Purpose.** Making embeddings and their structure legible.
+
+**Required sections**
+1. Visualization: PCA, t-SNE, UMAP, PHATE — and the rules for honest use.
+2. Neighborhood and local structure; trustworthiness/continuity metrics.
+3. Probing: linear probes, structural probes, and what they can/can't show.
+4. Attribution and attention: saliency, integrated gradients, attention caveats.
+5. Latent-space arithmetic and directions (disentanglement).
+6. Reporting checklist for embedding figures.
+
+**Required artifacts.** Visualization-method comparison table; a "do/don't"
+figure checklist.
+
+**Key citations.** McInnes UMAP; Moon PHATE; Belinkov & Glass probing;
+Jain/Rudin attention-is-not-explanation; Sundararajan integrated gradients.
+
+**Done when.** The reader can produce an embedding figure that is not
+misleading.
+
+## Chapter 13 — Foundation Models and Emerging Directions
+*File:* `chapters/13-foundation-models.qmd`
+
+**Purpose.** The current frontier and open problems.
+
+**Required sections**
+1. What "foundation model" means in biology; scaling laws.
+2. Modality-specific foundation models (recap and comparison).
+3. Multimodal/generalist biological models and virtual cell efforts.
+4. Agentic and reasoning systems over biological embeddings.
+5. Open challenges: data curation, evaluation, compute, licensing, ethics.
+6. Speculative outlook (clearly labelled as such).
+
+**Required artifacts.** Foundation-model comparison matrix; a challenges table.
+
+**Key citations.** Bommasani foundation models; Lin ESM-2; Dalla-Torre NT;
+Bunne (toward a virtual cell); Cui scGPT; Boiko autonomous labs (with caveats).
+
+**Done when.** Speculation is labelled and grounded where possible.
+
+## Chapter 14 — Applications and Case Studies
+*File:* `chapters/14-applications.qmd`
+
+**Purpose.** End-to-end uses of embeddings.
+
+**Required sections**
+1. Variant effect prediction (protein and regulatory).
+2. Drug discovery: property prediction, virtual screening, repurposing.
+3. Annotation transfer and homology-free function prediction.
+4. Antibody design and protein engineering (embedding-guided).
+5. Clinical/biomarker embeddings and patient stratification.
+6. A worked mini case study, reproducible in principle.
+
+**Required artifacts.** Application → modality → method → metric table; a
+pipeline diagram for the worked case study.
+
+**Key citations.** Brandes (variant effects); Frazer (disease variant
+prediction); Stokes (antibiotic discovery); Hie (antibody); Madani (protein
+generation); Jumper AlphaFold2.
+
+**Done when.** The worked case study states inputs, model, evaluation, and
+limitations.
+
+---
+
+# Appendices
+
+## Appendix A — Mathematical Background (`chapters/appendix-a-math.qmd`)
+Linear algebra refresher, probability, information theory (entropy, KL,
+mutual information), optimization basics. This is the canonical notation source.
+
+## Appendix B — Tools and Datasets Cheat Sheet (`chapters/appendix-b-tools-data.qmd`)
+Tables of major datasets (UniProt, PDB, Pfam, GTEx, GEO, Human Cell Atlas) and
+libraries (PyTorch, Hugging Face, Biopython, RDKit, Scanpy, scvi-tools,
+PyTorch Geometric, DGL), each with a one-line purpose and link.
+
+## Appendix C — Glossary (`chapters/appendix-c-glossary.qmd`)
+Alphabetical definitions of every bolded term used in the book.
+
+## About `references.bib`
+Single shared bibliography. Keys are `firstauthorYYYY` unless a well-known
+acronym is clearer. Verifier checks: (a) key resolves in the text, (b) entry has
+title + venue/year, (c) DOI or stable URL present for post-2000 work.

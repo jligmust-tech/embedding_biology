@@ -1,0 +1,10 @@
+---
+title: "Appendix B — Tools and Datasets Cheat Sheet"
+---
+
+::: {.callout-warning}
+**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Appendix B*.
+Every named method must be cited to its primary source; keys must resolve in the bibliography.
+:::
+
+TODO

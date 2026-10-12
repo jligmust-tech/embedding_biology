@@ -1,0 +1,10 @@
+---
+title: "Appendix C — Glossary"
+---
+
+::: {.callout-warning}
+**Placeholder.** Written against **[Outline and Writing Requirements](../outline.qmd)** — *Appendix C*.
+Every named method must be cited to its primary source; keys must resolve in the bibliography.
+:::
+
+TODO
