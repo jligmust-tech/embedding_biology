@@ -163,6 +163,12 @@ $$ {#eq-ch11-alignment-uniformity}
 
 where low alignment loss means positive pairs are close and low uniformity loss means features spread over the hypersphere rather than collapsing to a point (@eq-ch11-alignment-uniformity). Both are computable without labels and serve as diagnostic complements to task metrics, never as replacements for them [@wang2020understanding].
 
+![ROC and precision--recall curves for the same scores on a data set with roughly one percent positives. The ROC curve (left) looks strong, while the precision--recall curve (right) exposes the low precision achieved at useful recall; both are computed in `tools/make_figures.py`.](../figures/roc-vs-pr.png){#fig-roc-pr fig-align="center" width=95%}
+
+The imbalance effect is visible directly in @fig-roc-pr: the same scores give a
+flattering ROC curve and a sobering precision--recall curve, because the false
+positive rate is divided by a large negative count while precision is not.
+
 No single number suffices. A credible report includes at least one ranking metric, one threshold-dependent metric, a calibration check, and confidence intervals that reflect the variability of the split.
 
 # Reproducibility and reporting checklist

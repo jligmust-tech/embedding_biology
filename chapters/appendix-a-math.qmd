@@ -98,12 +98,14 @@ surrounding context always resolves which is meant:
   for the PSSM log-odds matrix (Chapter 5), a molecule (Chapter 7), the set of
   masked positions (Chapters 4, 13), and the number of calibration bins
   (Chapter 11); context fixes which.
-- $k$: a $k$-mer length and the neighbourhood size in a $k$-NN graph (Chapters 4,
-  11); also the truncation order of a top-$k$ construction — the number of PCA
-  components or the Eckart--Young approximation rank (this appendix, Chapters
-  2--3) — which the dimensionality-reduction chapters of Chapters 3 and 10 write
-  as the reduced embedding dimension (a documented local overload of the
-  canonical embedding dimension $d$).
+- $k$: a count, never a bare dimension. It is a $k$-mer length, the
+  neighbourhood size in a $k$-NN graph (Chapters 4, 11), and the truncation
+  order of a top-$k$ construction. In an explicit reduction it is the reduced
+  dimension, always paired as $d \to k$ with $k \le d$: $d$ is the (full)
+  embedding dimension and $k$ the reduced one (this appendix, Chapters 2--3).
+  A representation that is not an explicit reduction is $d$-dimensional; the
+  knowledge-graph embeddings of Chapter 10 are therefore written in
+  $\mathbb{R}^d$, not $\mathbb{R}^k$.
 - $\mathbf{z}_v^{(l)}$ vs $\mathbf{h}_v^{(l)}$: the same object — the node/atom
   state at layer $l$. Chapter 10 writes $\mathbf{z}_v^{(l)}$; this appendix
   provides the canonical $\mathbf{h}_v^{(l)}$.
@@ -136,7 +138,7 @@ resolves here with a stated type or shape.
 | $\mathcal{D}$ | training dataset; also a set of observed pairs in a prediction objective | set / multiset |
 | $n$ | number of examples (rows of the data matrix) | integer |
 | $d$ | embedding (latent) dimension; also the ambient / feature dimension of $x$ (Ch. 1–3) | integer |
-| $k$ | k-mer length; $k$-NN neighbourhood size; top-$k$ truncation (PCA components, Eckart–Young) | integer |
+| $k$ | a count: $k$-mer length, $k$-NN size, top-$k$ / truncation rank, and the reduced dimension in an explicit reduction ($k \le d$) | integer |
 | $g$ | number of genes (single-cell feature dimension) | integer |
 | $K$ | number of negative samples (contrastive, SGNS); number of classes/keys in a softmax | integer |
 | $r$ | rank of a matrix | integer |

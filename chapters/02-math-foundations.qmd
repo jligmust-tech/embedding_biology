@@ -149,6 +149,14 @@ The common misinterpretations reduce to one habit: reading a nonlinear layout as
 
 : Table 2.2. Dimensionality-reduction methods compared by linearity, preserved quantity, and failure mode.
 
+@fig-dim-reduction makes the table concrete on a synthetic 3D S-curve. PCA keeps
+pairwise distances approximately linear in the projection, whereas t-SNE
+separates local neighbourhoods at the cost of destroying the metric — the
+right-hand panel, which correlates original and projected distances, is the
+quantitative statement of "the layout is not a coordinate system".
+
+![PCA versus t-SNE on a synthetic three-dimensional S-curve. The first two panels colour points by the intrinsic coordinate of the curve; the third panel plots original pairwise distances against projected distances, with the Pearson correlation annotated. PCA preserves distances approximately; t-SNE separates neighbourhoods but its coordinates are not distances. Computed by `tools/make_figures.py`.](../figures/dim-reduction.png){#fig-dim-reduction fig-align="center" width=100%}
+
 # Embedding Spaces: Linear Structure, Anisotropy, Alignment, and Analogies
 
 Embeddings are not merely points; their *directions* carry structure. **Linear probing** exploits this: one fits a linear classifier or regressor from embeddings to labels, and the accuracy of the probe measures how linearly accessible the target property is. Formally, given embeddings $\mathbf{z}_i \in \mathbb{R}^d$ and task values $y_i \in \mathbb{R}$, a probe solves

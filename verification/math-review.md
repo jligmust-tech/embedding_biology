@@ -55,7 +55,12 @@ resolve, and equation labels are globally unique book-wide.
 The verifiers agreed on a set of book-wide notation rules; the application of
 those rules is logged in [notation-consistency.md](notation-consistency.md):
 
-1. Embedding/latent dimension = `d`; rank = `r`; k-mer / k-NN use `k`.
+1. **Dimension rule (final).** `d` is the feature/embedding dimension of a
+   representation. `k` is a *count* — k-mer length, k-NN size, top-`k`, matrix
+   rank — and, only inside an explicit reduction, the reduced dimension, always
+   paired as `d → k` with `k ≤ d`. `r` is the rank of a matrix. A
+   representation that is not an explicit reduction (e.g. the knowledge-graph
+   embeddings of Chapter 10, formerly written `ℝ^k`) is `d`-dimensional.
 2. Covariance normalization = `1/n` (MLE convention).
 3. Generic distance = `D(·,·)`; named distances `d_2`, `d_M`, `d_cos`.
 4. `D_KL` for KL divergence, `\mathcal{L}` for loss, `σ` = logistic sigmoid.

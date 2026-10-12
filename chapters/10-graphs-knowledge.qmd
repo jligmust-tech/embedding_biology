@@ -19,7 +19,7 @@ scalars are italic. A graph has $n=|V|$ nodes; node embeddings at layer $l$ are
 $\mathbf{z}_v^{(l)} \in \mathbb{R}^{d_l}$ and are stacked row-wise into
 $\mathbf{Z}^{(l)} \in \mathbb{R}^{n \times d_l}$; a knowledge-graph fact
 $(h,r,t)$ has head, relation, and tail embeddings
-$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^k$ (or $\mathbb{C}^k$ for
+$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^d$ (or $\mathbb{C}^d$ for
 the complex models); $\sigma$ is the logistic sigmoid and $\odot$ the Hadamard
 product.
 
@@ -65,8 +65,8 @@ DeepWalk runs uniform random walks from each node and trains the SGNS objective 
 the resulting (node, context) pairs [@perozzi2014deepwalk]. node2vec generalizes
 the walk distribution with return and in-out parameters $p$ and $q$, controlling
 whether the walk revisits its origin and whether it explores locally or
-globally [@grover2016node2vec]. With node embedding $\mathbf{z}_u \in \mathbb{R}^k$
-and context embedding $\mathbf{z}_c \in \mathbb{R}^k$, pair set $\mathcal{D}$
+globally [@grover2016node2vec]. With node embedding $\mathbf{z}_u \in \mathbb{R}^d$
+and context embedding $\mathbf{z}_c \in \mathbb{R}^d$, pair set $\mathcal{D}$
 sampled from walks, $K$ negatives, and noise distribution $P_n$, the objective
 
 $$
@@ -256,7 +256,7 @@ $$
 f(h, r, t) = -\,\lVert \mathbf{e}_h + \mathbf{e}_r - \mathbf{e}_t \rVert_2,
 $$ {#eq-ch10-transe}
 
-where $\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^k$ are the
+where $\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{R}^d$ are the
 embeddings of head, relation, and tail. TransE is simple and strong on one-to-one
 relations but fails on one-to-many, many-to-one, and symmetric relations. The
 symmetric failure is exact: if $r$ is symmetric then both $(h,r,t)$ and $(t,r,h)$
@@ -281,7 +281,7 @@ non-identifiability is the motivation for rotation- and product-based scores.
 
 RotatE models each relation as a rotation in complex space, so a relation can map
 one head to several tails. Writing the complex embeddings
-$\mathbf{e}_h, \mathbf{e}_t \in \mathbb{C}^k$ with per-coordinate modulus at most
+$\mathbf{e}_h, \mathbf{e}_t \in \mathbb{C}^d$ with per-coordinate modulus at most
 one, the score is
 
 $$
@@ -312,7 +312,7 @@ $(h,r,t)$ and $(t,r,h)$, so it cannot rank one above the other
 [@yang2015embedding].
 
 ComplEx restores asymmetry with a complex bilinear product. For
-$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{C}^k$, the score is
+$\mathbf{e}_h, \mathbf{e}_r, \mathbf{e}_t \in \mathbb{C}^d$, the score is
 
 $$
 f(h, r, t) = \mathrm{Re}\!\left(\langle \mathbf{e}_h, \mathbf{e}_r, \overline{\mathbf{e}_t} \rangle\right)

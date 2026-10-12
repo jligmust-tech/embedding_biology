@@ -56,6 +56,19 @@ book and deploys it to GitHub Pages.
 
 Work in progress. See the [outline](outline.qmd) for chapter-by-chapter status.
 
+## Quality checks
+
+```bash
+python3 tools/check_book.py     # citation keys, cross-ref labels, placeholders
+python3 tools/citation_sweep.py # optional: verify entries against Crossref
+python3 tools/make_figures.py   # regenerate the computed figures in figures/
+```
+
+The `Book checks` GitHub Actions workflow runs `check_book.py` and a `quarto
+render` smoke test on every push and pull request. See `verification/` for the
+math-verification, notation-consistency, and citation logs, and `CHANGELOG.md`
+for the release history.
+
 ## License
 
-To be decided by the repository owner.
+Text and figures: CC BY 4.0. Code: MIT. See [LICENSE](LICENSE).
